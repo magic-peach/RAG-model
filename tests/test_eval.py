@@ -60,12 +60,26 @@ def test_parse_score(raw, expected):
 
 def test_summarize_skips_missing_scores():
     rows = [
-        {"hit": 1.0, "rr": 1.0, "retrieval_s": 1.0, "faithfulness": None, "not_found": True},
-        {"hit": 0.0, "rr": 0.0, "retrieval_s": 3.0, "faithfulness": 4, "not_found": False},
+        {
+            "hit": 1.0,
+            "rr": 1.0,
+            "retrieval_s": 1.0,
+            "faithfulness": None,
+            "not_found": True,
+            "cited": [],
+        },
+        {
+            "hit": 0.0,
+            "rr": 0.0,
+            "retrieval_s": 3.0,
+            "faithfulness": 4,
+            "not_found": False,
+            "cited": [2],
+        },
     ]
     s = summarize(rows)
     assert s["hit@5"] == 0.5 and s["faithfulness"] == 4 and s["not_found"] == 0.5
-    assert s["retrieval_s"] == 2.0 and s["relevance"] is None
+    assert s["retrieval_s"] == 2.0 and s["relevance"] is None and s["cited"] == 1.0
 
 
 def test_load_questions_skips_placeholders(tmp_path):

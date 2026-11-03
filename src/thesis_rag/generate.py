@@ -133,16 +133,16 @@ def expand_query(llm: BaseChatModel, question: str, n: int = 3) -> list[str]:
 # copies a tag instead of composing chapter/section/page itself, which an 8B
 # model gets wrong surprisingly often.
 
-ANSWER_PROMPT_VERSION = "v1"
+ANSWER_PROMPT_VERSION = "v2"
 NOT_FOUND = "Not found in the thesis."
 
 ANSWER_SYSTEM = f"""You answer questions about a PhD thesis using ONLY the numbered \
 passages provided. Rules:
 1. Use only facts stated in the passages. Do not use outside knowledge.
-2. Cite every sentence that states a fact with the tag shown on the passage it came \
-from, copied exactly, at the end of the sentence: "<claim> [Ch.X §Y, p.Z]." Use \
-several tags if several passages support it. Never cite a passage that does not \
-contain the fact.
+2. End every sentence that states a fact with the citation tag of the passage it \
+came from, copied exactly as shown after "cite as" (square brackets included). \
+Use several tags if several passages support it. Never cite a passage that does \
+not contain the fact.
 3. If the passages do not contain the answer, reply exactly: {NOT_FOUND}
 4. Never invent or estimate numbers, names, genotypes or results. Quote numbers \
 exactly as written in the passages.
@@ -188,7 +188,9 @@ def format_context(passages: list[Passage]) -> str:
     """Numbered passages, each with its citation tag and heading path."""
     blocks = []
     for i, p in enumerate(passages, start=1):
-        blocks.append(f"Passage {i} {passage_citation(p)}\n{p.header}\n\n{p.context.strip()}")
+        blocks.append(
+            f"Passage {i} (cite as {passage_citation(p)})\n{p.header}\n\n{p.context.strip()}"
+        )
     return "\n\n---\n\n".join(blocks)
 
 
@@ -198,6 +200,29 @@ def build_messages(question: str, passages: list[Passage]) -> list[BaseMessage]:
 
 
 _TAG = re.compile(r"\[[^\[\]]{2,80}\]")
+
+
+_PASSAGE_ONLY = re.compile(r"\[(?:passage|source)\s*(\d+)\]", re.IGNORECASE)
+_PASSAGE_PREFIX = re.compile(r"\[(?:passage|source)\s*\d+\s*[,:;\u2013-]\s*", re.IGNORECASE)
+
+
+def normalize_citations(answer: str, passages: list[Passage]) -> str:
+    """Repair the citation slips an 8B model makes, so tags match the sources.
+
+    "[Passage 4, Ch.4 §4.11, p.76]" -> "[Ch.4 §4.11, p.76]", "[Passage 2]" ->
+    that passage's tag, and a stray "<claim>" placeholder is dropped. Bare
+    numbers like "[4]" are left alone: the thesis's own reference list uses them.
+    """
+
+    def by_number(m: re.Match) -> str:
+        n = int(m.group(1))
+        return passage_citation(passages[n - 1]) if 1 <= n <= len(passages) else m.group(0)
+
+    text = re.sub(r"<\s*claim\s*>", "", answer, flags=re.IGNORECASE)
+    text = _PASSAGE_PREFIX.sub("[", text)
+    text = _PASSAGE_ONLY.sub(by_number, text)
+    text = re.sub(r"\.\s+\[", " [", text)  # "fact. [tag]." -> "fact [tag]."
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
 def cited_passages(answer: str, passages: list[Passage]) -> list[int]:
@@ -266,6 +291,7 @@ class ThesisQA:
 
     def _finish(self, question: str, text: str, result: RetrievalResult) -> Answer:
         passages = result.passages
+        text = normalize_citations(text, passages)
         return Answer(
             question=question,
             answer=text,

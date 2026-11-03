@@ -9,6 +9,7 @@ from thesis_rag.generate import (
     cited_passages,
     format_context,
     is_not_found,
+    normalize_citations,
     source_dict,
 )
 from thesis_rag.retrieve import Passage, RetrievalResult
@@ -65,8 +66,10 @@ def passages():
 
 def test_format_context_numbers_and_tags(passages):
     ctx = format_context(passages)
-    assert ctx.startswith("Passage 1 [Ch.4 §4.3, p.62]\nChapter 4: Results › §4.3 Title 1")
-    assert "Passage 3 [Ch.4 §4.7, p.70]" in ctx
+    assert ctx.startswith(
+        "Passage 1 (cite as [Ch.4 §4.3, p.62])\nChapter 4: Results › §4.3 Title 1"
+    )
+    assert "Passage 3 (cite as [Ch.4 §4.7, p.70])" in ctx
     assert ctx.count("---") == 2
 
 
@@ -127,3 +130,24 @@ def test_no_passages_skips_llm():
 
     qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever([]), llm=ExplodingLLM())
     assert qa.ask("anything").answer == NOT_FOUND
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Phytophthora [Passage 1, Ch.4 §4.3, p.62].", "Phytophthora [Ch.4 §4.3, p.62]."),
+        ("QD is < 2.0. <claim> [Ch.4 §4.5, p.66].", "QD is < 2.0 [Ch.4 §4.5, p.66]."),
+        ("Yield fell [Passage 3].", "Yield fell [Ch.4 §4.7, p.70]."),
+        ("See [Passage 9] and ref [4].", "See [Passage 9] and ref [4]."),
+        ("Clean [Ch.4 §4.3, p.62].", "Clean [Ch.4 §4.3, p.62]."),
+    ],
+)
+def test_normalize_citations(raw, expected, passages):
+    assert normalize_citations(raw, passages) == expected
+
+
+def test_answer_is_normalized_before_citations_are_counted(passages):
+    llm = fake_llm(["Yield fell [Passage 2, Ch.4 §4.5, p.66]."])
+    qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever(passages), llm=llm)
+    ans = qa.ask("How did yield change?")
+    assert ans.answer == "Yield fell [Ch.4 §4.5, p.66]." and ans.cited == [2]

@@ -25,6 +25,8 @@ Faithfulness, relevance
         1-5 scores from an LLM judge (prompts in eval/prompts/). The judge is
         the same local llama3.1:8b, which is a known weakness (a model grading
         itself is lenient); treat these as relative, not absolute, numbers.
+Cited  share of answers (excluding "Not found") with at least one citation tag
+        that matches a retrieved passage.
 "Not found"
         share of answers that were exactly "Not found in the thesis.".
 
@@ -260,6 +262,8 @@ def summarize(rows: list[dict]) -> dict:
         "faithfulness": _mean(r.get("faithfulness") for r in rows),
         "relevance": _mean(r.get("relevance") for r in rows),
         "not_found": _mean(float(r["not_found"]) for r in rows if "not_found" in r),
+        # Of the answers that claim something, how many carry a valid citation tag.
+        "cited": _mean(float(bool(r["cited"])) for r in rows if r.get("not_found") is False),
         "retrieval_s": statistics.median(r["retrieval_s"] for r in rows) if rows else None,
     }
 
@@ -289,16 +293,17 @@ def render_markdown(results: dict, questions: list[dict], meta: dict) -> str:
         f"- Generator and judge: `{meta['llm']}` via Ollama; embeddings `{meta['embedding']}`",
         f"- Retrieval: top {K} passages; hit = a non-summary passage overlaps the expected pages",
         "",
-        "| Config | Change | hit@5 | MRR@5 | Faithfulness | Relevance | Not found "
+        "| Config | Change | hit@5 | MRR@5 | Faithfulness | Relevance | Cited | Not found "
         "| Retrieval s (median) |",
-        "|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for name, res in results.items():
         s = res["summary"]
         lines.append(
             f"| `{name}` | {DESCRIPTIONS[name]} | {_fmt(s['hit@5'], 'pct')} | "
             f"{_fmt(s['mrr@5'], 'f')} | {_fmt(s['faithfulness'], 'score')} | "
-            f"{_fmt(s['relevance'], 'score')} | {_fmt(s['not_found'], 'pct')} | "
+            f"{_fmt(s['relevance'], 'score')} | {_fmt(s['cited'], 'pct')} | "
+            f"{_fmt(s['not_found'], 'pct')} | "
             f"{_fmt(s['retrieval_s'], 's')} |"
         )
     lines += ["", "## Per-question rank of the first hit", ""]

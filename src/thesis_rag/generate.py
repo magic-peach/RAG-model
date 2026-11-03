@@ -9,6 +9,7 @@ so several retrieved sections fit in one prompt.
 from __future__ import annotations
 
 import logging
+import re
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -80,3 +81,35 @@ def summarize_thesis(
         "methods, key findings and overall contribution."
     )
     return _complete(llm, SUMMARY_SYSTEM, user)
+
+
+# ---------------------------------------------------------------------------
+# Multi-query expansion (query time, optional)
+# ---------------------------------------------------------------------------
+#
+# A user's wording often differs from the thesis's ("water stress" vs
+# "drought tolerance"). Asking the LLM for a few rephrasings and retrieving
+# with each one widens recall; RRF then rewards chunks found by several of
+# them. It costs one extra LLM call per question, so it is off by default.
+
+EXPAND_SYSTEM = (
+    "You rewrite search queries for a PhD thesis on mulberry genomics. Given a "
+    "question, write alternative phrasings that use different wording or likely "
+    "technical terms, keeping the same meaning. Output one per line, with no "
+    "numbering, quotes or commentary."
+)
+_LIST_MARKER = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
+
+
+def expand_query(llm: BaseChatModel, question: str, n: int = 3) -> list[str]:
+    """Return up to ``n`` rephrasings of ``question`` (never the question itself)."""
+    raw = _complete(llm, EXPAND_SYSTEM, f"Question: {question}\n\nWrite {n} rephrasings.")
+    variants: list[str] = []
+    for line in raw.splitlines():
+        line = _LIST_MARKER.sub("", line).strip().strip('"').strip()
+        # Skip blank lines and preambles like "Here are 3 rephrasings:".
+        if not line or line.endswith(":") or line.lower() == question.lower():
+            continue
+        if line not in variants:
+            variants.append(line)
+    return variants[:n]

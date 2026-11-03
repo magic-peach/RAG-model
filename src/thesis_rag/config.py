@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(72, description="Token overlap between neighbouring chunks")
     max_parent_tokens: int = Field(
         1500,
-        description="Parents longer than this are replaced by a window around the child chunk",
+        description="Sibling sections are merged into one parent only if they fit this budget",
     )
     structured_chunking: bool = Field(
         True, description="False reproduces the v1 page-based splitter (eval baseline)"
@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     use_multi_query: bool = False
     num_query_variants: int = 3
     use_parent_context: bool = True
+    max_passage_tokens: int = Field(
+        1200,
+        description="A parent longer than this is not sent to the LLM; the matched chunk is",
+    )
 
     # --- Ingestion ---
     summarize_sections: bool = True

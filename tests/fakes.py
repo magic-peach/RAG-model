@@ -28,3 +28,17 @@ class FakeEmbedder:
 
 def fake_llm(responses: list[str]) -> FakeListChatModel:
     return FakeListChatModel(responses=responses)
+
+
+class FakeReranker:
+    """Scores a passage by how many query words it contains (no model download)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def score(self, query: str, texts: list[str]) -> list[float]:
+        self.calls += 1
+        words = set(re.findall(r"[a-z0-9]+", query.lower()))
+        return [
+            len(words & set(re.findall(r"[a-z0-9]+", t.lower()))) / (len(words) or 1) for t in texts
+        ]

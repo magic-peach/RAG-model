@@ -86,6 +86,9 @@ python -m thesis_rag.analyze card                 # writes data/knowledge_card.j
 python -m thesis_rag.analyze csv my_data.csv --group genotype
 ```
 
+`examples/sample_variants.csv` is a small **synthetic** variant-QC table (QD, FS, SOR,
+MQ by genotype) for trying the Analyze tab; it is not data from the thesis.
+
 The first ingestion of a ~100-page thesis makes one Llama call per section for
 the summaries; expect anywhere from 15 minutes on a free machine to over an hour
 on a busy one. Use `--no-summaries` to skip them. The reranker (~1 GB) is

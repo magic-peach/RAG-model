@@ -51,7 +51,13 @@ sys.path.insert(0, str(ROOT / "src"))
 from thesis_rag.chunking import SUMMARY  # noqa: E402
 from thesis_rag.config import Settings, get_settings  # noqa: E402
 from thesis_rag.generate import ThesisQA, format_context, get_llm  # noqa: E402
-from thesis_rag.index import Embedder, Index, SummaryCache, build_index  # noqa: E402
+from thesis_rag.index import (  # noqa: E402
+    Embedder,
+    Index,
+    SummaryCache,
+    build_index,
+    with_retry,
+)
 from thesis_rag.retrieve import Retriever, get_reranker  # noqa: E402
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -154,7 +160,9 @@ class CachedChat:
     def invoke(self, messages, **_):
         model = str(getattr(self.llm, "model", ""))
         key = self.cache.key(self.tag, model, *(str(m.content) for m in messages))
-        text = self.cache.get_or_make(key, lambda: str(self.llm.invoke(messages).content))
+        text = self.cache.get_or_make(
+            key, lambda: str(with_retry(lambda: self.llm.invoke(messages)).content)
+        )
         return AIMessage(content=text)
 
     def complete(self, system: str, user: str) -> str:

@@ -54,3 +54,22 @@ def test_bm25_tokenize_keeps_identifiers():
         "3.10",
         "gatk",
     ]
+
+
+def test_with_retry_recovers_then_gives_up(monkeypatch):
+    monkeypatch.setattr(index_mod.time, "sleep", lambda s: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise ConnectionError("llama-server did not start")
+        return "ok"
+
+    assert index_mod.with_retry(flaky) == "ok" and len(calls) == 3
+
+    def broken():
+        raise ConnectionError("down")
+
+    with pytest.raises(ConnectionError):
+        index_mod.with_retry(broken, attempts=2)

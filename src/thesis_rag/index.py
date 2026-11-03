@@ -58,6 +58,22 @@ ProgressFn = Callable[[str, float], None]
 # ---------------------------------------------------------------------------
 
 
+def with_retry(fn: Callable, attempts: int = 4, wait: float = 15.0):
+    """Call ``fn()``, retrying transient Ollama failures with linear backoff.
+
+    Under memory pressure Ollama can fail to (re)load a model ("timed out
+    waiting for llama-server to start"); a later attempt usually succeeds.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:  # ollama raises ResponseError, httpx errors, ...
+            if attempt == attempts:
+                raise
+            log.warning("Ollama call failed (%s); retry %d/%d", exc, attempt, attempts - 1)
+            time.sleep(wait * attempt)
+
+
 class Embedder:
     """Ollama embeddings with the task prefixes nomic-embed-text was trained with.
 
@@ -77,10 +93,11 @@ class Embedder:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if self._prefixed:
             texts = [f"search_document: {t}" for t in texts]
-        return self._model.embed_documents(texts)
+        return with_retry(lambda: self._model.embed_documents(texts))
 
     def embed_query(self, text: str) -> list[float]:
-        return self._model.embed_query(f"search_query: {text}" if self._prefixed else text)
+        query = f"search_query: {text}" if self._prefixed else text
+        return with_retry(lambda: self._model.embed_query(query))
 
 
 # ---------------------------------------------------------------------------

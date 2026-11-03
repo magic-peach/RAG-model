@@ -5,7 +5,7 @@
 Endpoints
 ---------
 GET  /healthz   liveness for Docker; never touches Ollama or the index
-GET  /status    document name, index counts, ingest progress, Ollama reachability
+GET  /status    document name, index counts, ingest progress, Ollama state (ok/busy/offline)
 POST /ingest    upload a PDF (or name a server-side path); builds the index in a
                 background thread and reports progress through /status
 POST /ask       {"question": ...} -> Server-Sent Events: "token" events while the
@@ -25,6 +25,7 @@ import os
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -138,12 +139,17 @@ class AppState:
         threading.Thread(target=run, name="ingest", daemon=True).start()
 
 
-def _ollama_reachable(base_url: str, timeout: float = 4.0) -> bool:
+def _ollama_status(base_url: str, timeout: float = 4.0) -> str:
+    """'ok', 'busy' (no reply in time: usually mid-generation on a slow machine) or 'offline'."""
     try:
         with urllib.request.urlopen(f"{base_url}/api/tags", timeout=timeout) as resp:
-            return resp.status == 200
+            return "ok" if resp.status == 200 else "offline"
+    except TimeoutError:
+        return "busy"
+    except urllib.error.URLError as exc:
+        return "busy" if isinstance(exc.reason, TimeoutError) else "offline"
     except Exception:
-        return False
+        return "offline"
 
 
 def _sse(event: str, data) -> str:
@@ -157,7 +163,7 @@ def create_app(
     settings: Settings | None = None,
     qa_factory: Callable[[Settings], object] | None = None,
     build_fn: Callable | None = None,
-    check_ollama: Callable[[str], bool] = _ollama_reachable,
+    check_ollama: Callable[[str], str] = _ollama_status,
 ) -> FastAPI:
     state = AppState(settings or get_settings(), qa_factory, build_fn)
     app = FastAPI(title="Thesis RAG", version="2.0.0")

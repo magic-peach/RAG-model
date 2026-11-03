@@ -36,7 +36,7 @@ def make_client(settings, answers=("Yield fell [Passage 1].",), build_fn=None):
         )
 
     app = create_app(
-        settings, qa_factory=qa_factory, build_fn=build_fn, check_ollama=lambda url: True
+        settings, qa_factory=qa_factory, build_fn=build_fn, check_ollama=lambda url: "ok"
     )
     return TestClient(app)
 
@@ -56,7 +56,7 @@ def test_healthz(settings):
 def test_status_before_and_after_indexing(settings):
     client = make_client(settings)
     s = client.get("/status").json()
-    assert s["indexed"] is False and s["document"] is None and s["ollama"] is True
+    assert s["indexed"] is False and s["document"] is None and s["ollama"] == "ok"
     _write_manifest(settings)
     s = client.get("/status").json()
     assert s["indexed"] is True and s["document"]["title"] == "A Study of Mulberry"
@@ -99,7 +99,7 @@ def test_ask_reports_llm_failure_in_stream(settings):
             s, index=object(), retriever=StubRetriever([_passage(1, "4.3", 62)]), llm=Down()
         )
 
-    app = create_app(settings, qa_factory=qa_factory, check_ollama=lambda url: False)
+    app = create_app(settings, qa_factory=qa_factory, check_ollama=lambda url: "offline")
     events = parse_sse(TestClient(app).post("/ask", json={"question": "x"}).text)
     assert events[-1][0] == "error" and "Ollama" in events[-1][1]["message"]
 
@@ -176,3 +176,9 @@ def test_serves_web_ui(settings):
     res = make_client(settings).get("/")
     assert res.status_code == 200 and "Ask the thesis" in res.text
     assert make_client(settings).get("/app.js").status_code == 200
+
+
+def test_ollama_status_offline_for_closed_port():
+    from thesis_rag.api import _ollama_status
+
+    assert _ollama_status("http://127.0.0.1:9", timeout=1) == "offline"

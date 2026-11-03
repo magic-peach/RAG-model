@@ -37,6 +37,9 @@ def test_rrf_agreement_beats_single_top_rank():
         "What is the overall contribution?",
         "What are the key findings?",
         "What is this thesis about?",
+        "what is this about",
+        "What's it all about?",
+        "Tell me about this document",
     ],
 )
 def test_broad_questions(question):

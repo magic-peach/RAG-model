@@ -72,6 +72,9 @@ _BROAD = re.compile(
     r"|(key|major|principal) (finding|contribution|result|takeaway)s?"
     r"|contributions? of (the|this) (thesis|work|study|research)"
     r"|what is (the|this) (thesis|work|study|research) about"
+    r"|what('s| is) (this|it) (\w+ )?about"
+    r"|tell me about (the|this) (thesis|document|work|study|research)"
+    r"|give me an overview"
     r"|(aim|objective|goal)s? of (the|this) (thesis|work|study|research)"
     r"|conclusions? of (the|this) (thesis|work|study|research)"
     r")\b",

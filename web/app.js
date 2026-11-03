@@ -44,7 +44,7 @@ async function refreshStatus() {
       pill.dataset.state = "error";
       $("#status-text").textContent = "Indexing failed";
       pill.title = ingest.error;
-    } else if (!s.ollama) {
+    } else if (s.ollama === "offline") {
       pill.dataset.state = "error";
       $("#status-text").textContent = s.indexed ? "Indexed · Ollama offline" : "Ollama offline";
     } else if (s.indexed) {

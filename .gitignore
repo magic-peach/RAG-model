@@ -174,6 +174,7 @@ cython_debug/
 # Source documents are never committed (the thesis is not ours to redistribute).
 # Put PDFs in data/raw/ and run `python -m thesis_rag.ingest data/raw/<file>.pdf`.
 data/raw/
-# Generated artifacts: vector index, docstore, ingestion cache, knowledge card
+# Generated artifacts: vector index + docstore, parse/summary cache, knowledge card
 data/index/
+data/cache/
 data/knowledge_card.json

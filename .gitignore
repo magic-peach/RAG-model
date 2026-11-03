@@ -163,3 +163,18 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# --- Project-specific ---
+# Local tooling
+.claude/
+.vscode/
+.DS_Store
+.ruff_cache/
+
+# Source documents are never committed (the thesis is not ours to redistribute).
+# Put PDFs in data/raw/ and run `python -m thesis_rag.ingest data/raw/<file>.pdf`.
+data/raw/
+# Generated artifacts: vector index + docstore, parse/summary cache, knowledge card
+data/index/
+data/cache/
+data/knowledge_card.json

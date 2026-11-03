@@ -1,0 +1,35 @@
+{"id": "q01", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q02", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q03", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q04", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q05", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q06", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q07", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q08", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q09", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q10", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q11", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q12", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q13", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q14", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q15", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q16", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q17", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q18", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q19", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q20", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q21", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q22", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q23", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q24", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "q25", "question": "", "expected_answer": "", "expected_pages": [], "source": "manual", "verified": false}
+{"id": "d01", "question": "How many species of the genus Morus are found in Asia?", "expected_answer": "The majority of which are found in Asia, 68 species.", "expected_pages": [16, 17], "source": "generated", "source_header": "Chapter 1: Introduction › §1.1 Taxonomy and Major Species", "verified": false}
+{"id": "d02", "question": "How many years does it take to develop a new variety of mulberry?", "expected_answer": "It takes approximately 15-20 years to develop a new variety of mulberry.", "expected_pages": [24, 25], "source": "generated", "source_header": "Chapter 1: Introduction › §1.7 Breeding Technologies of Mulberry", "verified": false}
+{"id": "d03", "question": "What is one of the diseases that cause root rot in mulberry trees?", "expected_answer": "Diseases that cause root rot are still another serious issue. These diseases, which cause wilting, leaf discoloration, and decreased plant vigor, can completely destroy mulberry trees.", "expected_pages": [30, 31], "source": "generated", "source_header": "Chapter 1: Introduction › §1.10.1 Problems Encountered by Mulberry Cultivators", "verified": false}
+{"id": "d04", "question": "What is the primary type of polyploid that arises from the multiplication of a diploid genome within a single species?", "expected_answer": "Autopolyploid.", "expected_pages": [39], "source": "generated", "source_header": "Chapter 2: Review of Literature › §2.1 Polyploidy in Plants", "verified": false}
+{"id": "d05", "question": "What is the threshold value that acts as a filter for selecting SNPs for the genotyping chip?", "expected_answer": "a specified quality benchmark", "expected_pages": [45, 46], "source": "generated", "source_header": "Chapter 2: Review of Literature › §2.7 Prerequisites for the genotyping chip", "verified": false}
+{"id": "d06", "question": "What genotyping techniques will be employed in the proposed research?", "expected_answer": "The research will employ genotyping, consensus generation, linkage mapping, SNP generations, SSR markers, and microarray chip development.", "expected_pages": [51, 52], "source": "generated", "source_header": "Chapter 2: Review of Literature › §2.12 Scope of the Study", "verified": false}
+{"id": "d07", "question": "What is the threshold for QD in the filtering criteria for variant calling analysis?", "expected_answer": "QD must be greater than 2.0.", "expected_pages": [59, 60], "source": "generated", "source_header": "Chapter 3: Research Methodology › §3.8 Variant Filtration", "verified": false}
+{"id": "d08", "question": "What is the phenotype associated with the alternative allele T in gene Mi00043?", "expected_answer": "Nitrogen Fixation, which is associated with Nutrient Use Efficiency (NUE).", "expected_pages": [76, 77, 78], "source": "generated", "source_header": "Chapter 4: Results and Discussion › §4.11 Genotype/phenotype relation", "verified": false}
+{"id": "d09", "question": "What is the drought tolerance of the K2 genotype?", "expected_answer": "The drought tolerance of the K2 genotype is Medium.", "expected_pages": [55, 56], "source": "generated", "source_header": "Chapter 3: Research Methodology › §3.1 Whole genome sequencing of the Mulberry data › Table 1 The Genotype details", "verified": false}
+{"id": "d10", "question": "What is the nitrogen use efficiency of the Assama Bola genotype?", "expected_answer": "The nitrogen use efficiency of the Assama Bola genotype is Low.", "expected_pages": [56], "source": "generated", "source_header": "Chapter 3: Research Methodology › §3.2 Retrieval of raw mulberry data › Table 2 Phenotype details of the samples collected", "verified": false}

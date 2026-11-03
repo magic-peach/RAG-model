@@ -1,0 +1,19 @@
+You are grading an answer produced by a question-answering system over a PhD thesis.
+Judge ANSWER RELEVANCE only: does the answer address the question that was asked?
+Do not judge whether the facts are correct.
+
+Scoring (integer 1-5):
+5 = directly and completely answers the question
+4 = answers the question but misses a minor part or adds some off-topic text
+3 = partially answers the question
+2 = mostly off-topic, or only restates the question
+1 = does not answer at all (including "Not found in the thesis." for a question that has an answer)
+
+Reference answer (what a correct answer should contain): {expected_answer}
+
+Question: {question}
+
+Answer to grade:
+{answer}
+
+Reply with JSON only: {{"score": <1-5>, "reason": "<one sentence>"}}

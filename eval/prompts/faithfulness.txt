@@ -1,0 +1,20 @@
+You are grading an answer produced by a question-answering system over a PhD thesis.
+Judge FAITHFULNESS only: is every factual claim in the answer supported by the passages?
+Do not judge style, completeness or whether you personally agree.
+
+Scoring (integer 1-5):
+5 = every claim is directly supported by the passages; numbers and names match exactly
+4 = all main claims supported; at most one minor detail is loosely paraphrased
+3 = mostly supported, but one claim is not found in the passages
+2 = several claims are unsupported, or a number/name differs from the passages
+1 = the answer is largely unsupported or contradicts the passages
+
+Passages:
+{context}
+
+Question: {question}
+
+Answer to grade:
+{answer}
+
+Reply with JSON only: {{"score": <1-5>, "reason": "<one sentence>"}}

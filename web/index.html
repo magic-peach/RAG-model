@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thesis RAG</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 3h9l4 4v14H6z M15 3v4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          <path d="M9 12h7M9 15.5h7M9 8.5h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+        <div class="brand-text">
+          <span class="eyebrow">Thesis RAG</span>
+          <h1 id="doc-name">Loading…</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="status-pill" class="pill" role="status" aria-live="polite">
+          <span class="dot" aria-hidden="true"></span><span id="status-text">Checking…</span>
+        </span>
+        <label class="button button-quiet" id="upload-label" hidden>
+          <input type="file" id="pdf-input" accept="application/pdf,.pdf" class="sr-only" />
+          Upload PDF
+        </label>
+      </div>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="Mode">
+      <button role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="true">Ask the thesis</button>
+      <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="false" tabindex="-1">
+        Analyze new data
+      </button>
+    </div>
+
+    <main id="main" class="layout">
+      <section id="panel-ask" class="panel" role="tabpanel" aria-labelledby="tab-ask">
+        <div id="chat" class="chat" aria-live="polite">
+          <div class="empty" id="chat-empty">
+            <h2>Ask anything about the thesis</h2>
+            <p>Answers come only from the document, with a page citation for every claim.</p>
+            <div class="examples">
+              <button type="button" class="example">What is the main contribution of this thesis?</button>
+              <button type="button" class="example">Which tool was used for variant calling?</button>
+              <button type="button" class="example">What filtering thresholds were applied to SNPs?</button>
+            </div>
+          </div>
+        </div>
+        <form id="ask-form" class="composer">
+          <label for="question" class="sr-only">Your question</label>
+          <textarea id="question" rows="2" maxlength="1000" placeholder="Ask about methods, results, thresholds…" required></textarea>
+          <button type="submit" id="ask-btn" class="button button-primary">Ask</button>
+        </form>
+        <p class="hint">Enter to send · Shift+Enter for a new line</p>
+      </section>
+
+      <section id="panel-analyze" class="panel" role="tabpanel" aria-labelledby="tab-analyze" hidden>
+        <form id="analyze-form" class="analyze-form">
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="csv-input" accept=".csv,text/csv,.tsv,text/tab-separated-values" class="sr-only" required />
+            <span class="dropzone-title" id="csv-name">Choose a CSV file</span>
+            <span class="dropzone-sub">or drop it here · up to 5 MB</span>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Compare groups by</span>
+              <select id="group-col">
+                <option value="">Detect automatically</option>
+              </select>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="explain" checked />
+              Explain with the thesis
+            </label>
+            <button type="submit" id="analyze-btn" class="button button-primary">Analyze</button>
+          </div>
+        </form>
+        <div id="analyze-out">
+          <div class="empty">
+            <h2>Check new data against the thesis</h2>
+            <p>
+              Statistics are computed with pandas and SciPy, then explained against the thesis with
+              citations. Columns named like a thesis threshold (for example <code>QD</code> or
+              <code>MQ</code>) are checked against it.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <aside class="sources" aria-labelledby="sources-title">
+        <h2 id="sources-title">Sources</h2>
+        <div id="sources-list">
+          <p class="muted">Passages used for an answer appear here. Select a citation to highlight its passage.</p>
+        </div>
+      </aside>
+    </main>
+  </body>
+</html>

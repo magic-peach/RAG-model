@@ -1,0 +1,45 @@
+# docker compose up --build   then open http://localhost:8000
+#
+# On a Mac, Docker cannot use the GPU, so Ollama inside a container is slow.
+# There, run Ollama natively (`ollama serve`) and start only the app:
+#   RAG_OLLAMA_BASE_URL=http://host.docker.internal:11434 docker compose up --build --no-deps app
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot job: download the two models into the shared volume.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["sh", "-c", "ollama pull llama3.1:8b && ollama pull nomic-embed-text"]
+    restart: "no"
+
+  app:
+    build: .
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      RAG_OLLAMA_BASE_URL: ${RAG_OLLAMA_BASE_URL:-http://ollama:11434}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data          # PDFs, index and caches survive rebuilds
+      - hf-cache:/app/hf-cache    # reranker weights, downloaded once
+
+volumes:
+  ollama:
+  hf-cache:

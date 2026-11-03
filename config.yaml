@@ -24,6 +24,8 @@ use_reranker: true
 reranker_model: BAAI/bge-reranker-base
 use_multi_query: false
 num_query_variants: 3
+use_parent_context: true
+max_passage_tokens: 1200  # longer parents are replaced by the matched chunk
 
 # --- Ingestion ---
 summarize_sections: true

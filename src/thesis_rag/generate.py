@@ -278,7 +278,10 @@ class ThesisQA:
         )
 
     def ask(self, question: str) -> Answer:
-        result = self.retriever.retrieve(question)
+        return self.answer(question, self.retriever.retrieve(question))
+
+    def answer(self, question: str, result: RetrievalResult) -> Answer:
+        """Generate from an existing retrieval (the eval scores retrieval separately)."""
         if not result.passages:
             return self._finish(question, NOT_FOUND, result)
         msg = self.llm.invoke(build_messages(question, result.passages))

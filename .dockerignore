@@ -1,6 +1,5 @@
 .git
 .venv
-.claude
 .github
 .ruff_cache
 .pytest_cache

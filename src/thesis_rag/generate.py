@@ -210,8 +210,9 @@ def normalize_citations(answer: str, passages: list[Passage]) -> str:
     """Repair the citation slips an 8B model makes, so tags match the sources.
 
     "[Passage 4, Ch.4 §4.11, p.76]" -> "[Ch.4 §4.11, p.76]", "[Passage 2]" ->
-    that passage's tag, and a stray "<claim>" placeholder is dropped. Bare
-    numbers like "[4]" are left alone: the thesis's own reference list uses them.
+    that passage's tag, "(cite as [tag])" -> "[tag]", and a stray "<claim>"
+    placeholder is dropped. Bare numbers like "[4]" are left alone: the
+    thesis's own reference list uses them.
     """
 
     def by_number(m: re.Match) -> str:
@@ -219,6 +220,7 @@ def normalize_citations(answer: str, passages: list[Passage]) -> str:
         return passage_citation(passages[n - 1]) if 1 <= n <= len(passages) else m.group(0)
 
     text = re.sub(r"<\s*claim\s*>", "", answer, flags=re.IGNORECASE)
+    text = re.sub(r"\(\s*cite as\s*(\[[^\[\]]+\])\s*\)", r"\1", text, flags=re.IGNORECASE)
     text = _PASSAGE_PREFIX.sub("[", text)
     text = _PASSAGE_ONLY.sub(by_number, text)
     text = re.sub(r"\.\s+\[", " [", text)  # "fact. [tag]." -> "fact [tag]."

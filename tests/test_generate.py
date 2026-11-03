@@ -138,6 +138,7 @@ def test_no_passages_skips_llm():
         ("Phytophthora [Passage 1, Ch.4 §4.3, p.62].", "Phytophthora [Ch.4 §4.3, p.62]."),
         ("QD is < 2.0. <claim> [Ch.4 §4.5, p.66].", "QD is < 2.0 [Ch.4 §4.5, p.66]."),
         ("Yield fell [Passage 3].", "Yield fell [Ch.4 §4.7, p.70]."),
+        ("It is Low (cite as [Ch.4 §4.7, p.70]).", "It is Low [Ch.4 §4.7, p.70]."),
         ("See [Passage 9] and ref [4].", "See [Passage 9] and ref [4]."),
         ("Clean [Ch.4 §4.3, p.62].", "Clean [Ch.4 §4.3, p.62]."),
     ],

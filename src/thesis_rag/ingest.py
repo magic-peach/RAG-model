@@ -520,13 +520,25 @@ def parse_markdown_pages(
     return build_sections(cleaned)
 
 
+_ACRONYM = re.compile(
+    r"\b(snp|snps|ssr|ssrs|dna|rna|pcr|qtl|gwas|gatk|bwa|nue|ngs)\b", re.IGNORECASE
+)
+
+
+def _upper_acronym(word: str) -> str:
+    return word[:-1].upper() + "s" if word.lower().endswith("s") and len(word) > 3 else word.upper()
+
+
 def guess_title(md_pages: list[str]) -> str:
     """Thesis title pages usually quote the title; return it if found."""
     if not md_pages:
         return ""
     first = clean_inline(" ".join(md_pages[0].split()))
     m = re.search(r"[“\"](.{15,250}?)[”\"]", first)
-    return title_case(m.group(1)) if m else ""
+    if not m:
+        return ""
+    # Title-casing an all-caps title turns "SNP" into "Snp"; put known acronyms back.
+    return _ACRONYM.sub(lambda a: _upper_acronym(a.group(0)), title_case(m.group(1)))
 
 
 def parse_pdf(pdf_path: str | Path) -> ParsedDocument:

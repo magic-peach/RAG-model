@@ -89,3 +89,10 @@ def test_is_real_table():
     assert not is_real_table([["just a text box"], ["more text"]])
     toc = [["1.1", "Taxonomy", "16"], ["1.2", "Intro", "17"], ["1.3", "Feed", "18"]]
     assert not is_real_table(toc)
+
+
+def test_guess_title_keeps_acronyms():
+    from thesis_rag.ingest import guess_title
+
+    page = 'Thesis entitled "DEVELOPMENT OF SNP ARRAYS AND SSRS IN MULBERRY" submitted'
+    assert guess_title([page]) == "Development of SNP Arrays and SSRs in Mulberry"

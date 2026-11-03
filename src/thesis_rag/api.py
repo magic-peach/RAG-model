@@ -138,7 +138,7 @@ class AppState:
         threading.Thread(target=run, name="ingest", daemon=True).start()
 
 
-def _ollama_reachable(base_url: str, timeout: float = 1.5) -> bool:
+def _ollama_reachable(base_url: str, timeout: float = 4.0) -> bool:
     try:
         with urllib.request.urlopen(f"{base_url}/api/tags", timeout=timeout) as resp:
             return resp.status == 200

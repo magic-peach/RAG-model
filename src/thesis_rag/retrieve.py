@@ -181,13 +181,14 @@ class Retriever:
             log.exception("Query expansion failed; using the original question only")
             return []
 
-    def retrieve(self, question: str) -> RetrievalResult:
+    def retrieve(self, question: str, allow_summaries: bool | None = None) -> RetrievalResult:
+        """``allow_summaries`` overrides routing: False keeps to original text only."""
         s, idx = self.settings, self.index
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
 
         if idx.has_summaries():
-            broad = is_broad(question)
+            broad = is_broad(question) if allow_summaries is None else allow_summaries
             types: list[str] | None = [TEXT, TABLE, SUMMARY] if broad else [TEXT, TABLE]
         else:
             broad, types = False, None  # baseline index: plain text only, nothing to filter

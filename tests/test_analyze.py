@@ -106,6 +106,10 @@ def test_parse_items_variants():
     assert _parse_items('[{"item": "b"}]') == [{"item": "b"}]
     assert _parse_items('{"objectives": [{"item": "c"}, "junk"]}') == [{"item": "c"}]
     assert _parse_items("no json") == []
+    truncated = (
+        '{"items": [{"item": "a", "citation": "[x]"}, {"item": "b", "citation": "[y]"}, {"it'
+    )
+    assert [i["item"] for i in _parse_items(truncated)] == ["a", "b"]
 
 
 def test_analyze_csv_stats_only(tmp_path):

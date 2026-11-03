@@ -115,14 +115,24 @@ def load_knowledge_card(settings: Settings) -> dict | None:
 
 
 def _parse_items(raw: str) -> list[dict]:
-    """Accept {"items": [...]}, a bare list, or {"<anything>": [...]}."""
+    """Accept {"items": [...]}, a bare list, or {"<anything>": [...]}.
+
+    If the JSON is cut off (the model hit its output limit), salvage every
+    complete flat ``{...}`` item instead of losing the whole field.
+    """
     match = re.search(r"[\[{].*[\]}]", raw, re.DOTALL)
-    if not match:
-        return []
     try:
-        data = json.loads(match.group(0))
+        data = json.loads(match.group(0)) if match else None
     except json.JSONDecodeError:
-        return []
+        data = None
+    if data is None:
+        items = []
+        for obj in re.findall(r"\{[^{}]*\}", raw):
+            try:
+                items.append(json.loads(obj))
+            except json.JSONDecodeError:
+                continue
+        return items
     if isinstance(data, dict):
         data = data.get("items") or next((v for v in data.values() if isinstance(v, list)), [])
     return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
@@ -130,7 +140,8 @@ def _parse_items(raw: str) -> list[dict]:
 
 def extract_field(qa: ThesisQA, llm, field: str) -> list[dict]:
     query, what, shape = CARD_FIELDS[field]
-    passages = qa.retriever.retrieve(query).passages
+    # Original text only: the card must cite thesis pages, not LLM-written summaries.
+    passages = qa.retriever.retrieve(query, allow_summaries=False).passages
     if not passages:
         return []
     user = (
@@ -146,7 +157,8 @@ def extract_field(qa: ThesisQA, llm, field: str) -> list[dict]:
         citation = normalize_citations(str(item.get("citation", "")), passages)
         item["citation"] = citation
         # Flag rather than drop: the reviewer decides, but sees which ones to check first.
-        item["citation_valid"] = citation in valid_tags
+        tags = re.findall(r"\[[^\[\]]+\]", citation)
+        item["citation_valid"] = bool(tags) and all(t in valid_tags for t in tags)
         items.append(item)
     return items
 
@@ -165,7 +177,7 @@ def build_knowledge_card(
         from .generate import ThesisQA
 
         qa = ThesisQA(settings)
-    llm = llm or get_llm(settings, temperature=0.0, num_predict=900, format="json")
+    llm = llm or get_llm(settings, temperature=0.0, num_predict=1500, format="json")
 
     card: dict = {
         "document": qa.index.manifest.get("title", ""),

@@ -154,3 +154,10 @@ def test_failed_expansion_falls_back(index):
     s = index.model_copy(update={"use_multi_query": True})
     r = Retriever(s, Index(s, embedder=FakeEmbedder()), reranker=FakeReranker(), llm=Broken())
     assert r.retrieve("leaf yield").queries == ["leaf yield"]
+
+
+def test_allow_summaries_override(index):
+    r = _retriever(index)
+    assert not r.retrieve("What are the key findings?", allow_summaries=False).broad
+    forced = r.retrieve("variant calling GATK", allow_summaries=True)
+    assert forced.broad and forced.passages[0].chunk.id == THESIS_SUMMARY_ID

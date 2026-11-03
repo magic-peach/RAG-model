@@ -100,7 +100,7 @@ class StubRetriever:
     def __init__(self, passages):
         self.passages = passages
 
-    def retrieve(self, question):
+    def retrieve(self, question, allow_summaries=None):
         return RetrievalResult(question, [question], False, self.passages, "rerank", {"total": 0.1})
 
 

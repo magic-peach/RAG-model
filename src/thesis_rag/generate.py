@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from .config import Settings
 
@@ -27,6 +28,20 @@ log = logging.getLogger(__name__)
 
 
 def get_llm(settings: Settings, **overrides) -> BaseChatModel:
+    """Chat model for the configured provider. Ollama-style overrides
+    (``num_predict``, ``format="json"``) are translated for Groq."""
+    if settings.llm_provider == "groq":
+        from langchain_groq import ChatGroq  # optional dependency: pip install ".[deploy]"
+
+        params: dict = {
+            "model": settings.groq_model,
+            "temperature": overrides.get("temperature", settings.temperature),
+            "max_tokens": overrides.get("num_predict", settings.max_answer_tokens),
+        }
+        if overrides.get("format") == "json":
+            params["model_kwargs"] = {"response_format": {"type": "json_object"}}
+        return ChatGroq(**params)
+
     from langchain_ollama import ChatOllama
 
     params = {
@@ -34,6 +49,8 @@ def get_llm(settings: Settings, **overrides) -> BaseChatModel:
         "base_url": settings.ollama_base_url,
         "temperature": settings.temperature,
         "num_ctx": settings.num_ctx,
+        # Keep the model in memory between questions: reloading 5 GB costs seconds.
+        "keep_alive": settings.keep_alive,
     }
     params.update(overrides)
     return ChatOllama(**params)
@@ -123,32 +140,79 @@ def expand_query(llm: BaseChatModel, question: str, n: int = 3) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Grounded answers (query time)
+# Answers (query time)
 # ---------------------------------------------------------------------------
 #
-# The prompt does three jobs: restrict the model to the passages, make every
-# claim traceable to a page, and give it a fixed phrase for "the thesis does
-# not say", so unsupported questions are easy to detect in evaluation and
-# in the UI. Each passage carries a ready-made citation tag, so the model
-# copies a tag instead of composing chapter/section/page itself, which an 8B
-# model gets wrong surprisingly often.
+# Each reply has up to three parts:
+#
+#   1. a mode: "thesis" (answered from the passages, with citations) or
+#      "general" (the thesis does not cover it, so the model answers from its
+#      own knowledge and the UI labels it "Not from the thesis");
+#   2. the answer, direct first sentence, plain language;
+#   3. "Reasoning:" with a few bullets saying which passages were used and
+#      how, so a reader can check the answer instead of trusting it.
+#
+# The mode is a fixed first line ("GENERAL:") rather than a judgement made
+# afterwards, so it can be read while the answer streams. Each passage carries
+# a ready-made citation tag that the model copies, because an 8B model gets
+# chapter/section/page wrong when it has to compose them itself.
 
-ANSWER_PROMPT_VERSION = "v2"
+ANSWER_PROMPT_VERSION = "v3"
 NOT_FOUND = "Not found in the thesis."
+GENERAL_MARKER = "GENERAL:"
+REASONING_MARKER = "Reasoning:"
 
-ANSWER_SYSTEM = f"""You answer questions about a PhD thesis using ONLY the numbered \
-passages provided. Rules:
-1. Use only facts stated in the passages. Do not use outside knowledge.
-2. End every sentence that states a fact with the citation tag of the passage it \
-came from, copied exactly as shown after "cite as" (square brackets included). \
-Use several tags if several passages support it. Never cite a passage that does \
-not contain the fact.
-3. If the passages do not contain the answer, reply exactly: {NOT_FOUND}
-4. Never invent or estimate numbers, names, genotypes or results. Quote numbers \
-exactly as written in the passages.
-5. If the passages answer only part of the question, answer that part and say \
-which part is not covered.
-6. Be concise: a short paragraph or a few bullet points. No preamble."""
+ANSWER_SYSTEM = f"""You are a friendly research assistant for a PhD thesis on mulberry \
+genomics. You receive numbered passages from the thesis and a question.
+
+First decide whether the passages answer the question.
+
+If they do:
+- Start with a direct one-sentence answer, then add detail in plain language. Explain \
+technical terms briefly so a non-specialist can follow.
+- End every sentence that states a fact from the thesis with the citation tag of its \
+passage, copied exactly as shown after "cite as" (square brackets included).
+- You may add one or two sentences of general background if it helps understanding; \
+end those with "(general knowledge)" instead of a tag, and never present them as the \
+thesis's findings.
+- Never invent or estimate numbers, names, genotypes or results. Quote numbers exactly.
+
+If they do not (the topic is not in the passages, or it is a general question):
+- Write the line {GENERAL_MARKER} first, then answer helpfully from general knowledge, \
+without citations, and do not claim the thesis says anything about it.
+
+Always finish with a line "{REASONING_MARKER}" followed by 1-3 short bullet points \
+explaining how you reached the answer: which passages you used and what they say, or \
+why the thesis does not cover the question.
+
+Keep the whole reply under 250 words. No preamble."""
+
+GENERAL_SYSTEM = f"""You are a friendly research assistant attached to a PhD thesis on \
+mulberry genomics. This message does not need the thesis (a greeting, thanks, or a \
+general question). Reply briefly and helpfully from general knowledge. Start with the \
+line {GENERAL_MARKER} and finish with a line "{REASONING_MARKER}" and one short bullet."""
+
+_SMALL_TALK = re.compile(
+    r"^\s*(hi|hello|hey|hiya|yo|thanks|thank you|thx|ok|okay|cool|great|bye|good (morning|"
+    r"afternoon|evening)|who are you|what can you do)\b[\s!.?]*$",
+    re.IGNORECASE,
+)
+_FOLLOW_UP = re.compile(
+    r"\b(it|its|this|that|these|those|they|them|he|she|more|why|how so|explain|elaborate|"
+    r"example|simpler|again)\b",
+    re.IGNORECASE,
+)
+
+
+def is_small_talk(question: str) -> bool:
+    return bool(_SMALL_TALK.match(question))
+
+
+def retrieval_query(question: str, history: list[tuple[str, str]]) -> str:
+    """Make a short follow-up ("why is that?") searchable by adding the previous question."""
+    if history and len(question.split()) <= 8 and _FOLLOW_UP.search(question):
+        return f"{history[-1][0]} {question}"
+    return question
 
 
 def _pages(start: int, end: int) -> str:
@@ -194,9 +258,99 @@ def format_context(passages: list[Passage]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def build_messages(question: str, passages: list[Passage]) -> list[BaseMessage]:
+def _history_messages(history: list[tuple[str, str]]) -> list[BaseMessage]:
+    msgs: list[BaseMessage] = []
+    for q, a in history:
+        msgs.append(HumanMessage(content=q))
+        msgs.append(AIMessage(content=a[:800]))  # earlier answers only for context
+    return msgs
+
+
+def build_messages(
+    question: str, passages: list[Passage], history: list[tuple[str, str]] | None = None
+) -> list[BaseMessage]:
     user = f"Passages:\n\n{format_context(passages)}\n\n---\n\nQuestion: {question}"
-    return [SystemMessage(content=ANSWER_SYSTEM), HumanMessage(content=user)]
+    return [
+        SystemMessage(content=ANSWER_SYSTEM),
+        *_history_messages(history or []),
+        HumanMessage(content=user),
+    ]
+
+
+def build_general_messages(
+    question: str, history: list[tuple[str, str]] | None = None
+) -> list[BaseMessage]:
+    return [
+        SystemMessage(content=GENERAL_SYSTEM),
+        *_history_messages(history or []),
+        HumanMessage(content=question),
+    ]
+
+
+def split_reply(raw: str) -> tuple[str, str, str]:
+    """Raw model output -> (mode, answer, reasoning)."""
+    text = raw.strip()
+    mode = "thesis"
+    if text.upper().startswith(GENERAL_MARKER):
+        mode, text = "general", text[len(GENERAL_MARKER) :].lstrip()
+    elif is_not_found(text):  # an older-style refusal still counts as off-thesis
+        mode = "general"
+    m = re.search(r"\n?\s*\**\s*reasoning\s*\**\s*:\s*\**", text, re.IGNORECASE)
+    if m:
+        return mode, text[: m.start()].strip(), text[m.end() :].strip()
+    return mode, text, ""
+
+
+class StreamSplitter:
+    """Turns raw streamed tokens into ("mode" | "token" | "reasoning", text) events.
+
+    Holds back just enough text to recognise the GENERAL: prefix and the
+    Reasoning: marker, so neither ever flashes on screen while streaming.
+    """
+
+    def __init__(self):
+        self.buffer = ""
+        self.mode: str | None = None
+        self.in_reasoning = False
+
+    def feed(self, token: str) -> list[tuple[str, str]]:
+        self.buffer += token
+        events: list[tuple[str, str]] = []
+        if self.mode is None:
+            head = self.buffer.lstrip()
+            if len(head) < len(GENERAL_MARKER) and GENERAL_MARKER.startswith(head.upper()):
+                return events  # could still become "GENERAL:"
+            if head.upper().startswith(GENERAL_MARKER):
+                self.mode, self.buffer = "general", head[len(GENERAL_MARKER) :].lstrip()
+            else:
+                self.mode, self.buffer = "thesis", head
+            events.append(("mode", self.mode))
+        if not self.in_reasoning:
+            m = re.search(r"\n?\s*\**\s*reasoning\s*\**\s*:\s*\**", self.buffer, re.IGNORECASE)
+            if m:
+                if m.start():
+                    events.append(("token", self.buffer[: m.start()]))
+                self.buffer, self.in_reasoning = self.buffer[m.end() :], True
+            else:
+                safe = len(self.buffer) - (len(REASONING_MARKER) + 6)
+                if safe > 0:
+                    events.append(("token", self.buffer[:safe]))
+                    self.buffer = self.buffer[safe:]
+                return events
+        if self.buffer:
+            events.append(("reasoning", self.buffer))
+            self.buffer = ""
+        return events
+
+    def flush(self) -> list[tuple[str, str]]:
+        events = []
+        if self.mode is None:
+            self.mode = "thesis"
+            events.append(("mode", self.mode))
+        if self.buffer:
+            events.append(("reasoning" if self.in_reasoning else "token", self.buffer))
+            self.buffer = ""
+        return events
 
 
 _TAG = re.compile(r"\[[^\[\]]{2,80}\]")
@@ -263,7 +417,9 @@ class Answer:
     answer: str
     sources: list[dict]
     cited: list[int] = field(default_factory=list)
-    not_found: bool = False
+    mode: str = "thesis"  # "thesis" (from the passages) or "general" (not from the thesis)
+    reasoning: str = ""
+    not_found: bool = False  # kept for the eval: True when the thesis did not answer
     broad: bool = False
     queries: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
@@ -273,7 +429,7 @@ class Answer:
 
 
 class ThesisQA:
-    """Retrieve, then answer with citations. Shared by the API, the CLI and the eval."""
+    """Retrieve, then answer. Shared by the API, the CLI and the eval."""
 
     def __init__(
         self,
@@ -288,47 +444,82 @@ class ThesisQA:
         self.settings = settings
         self.index = index or Index(settings)
         self.retriever = retriever or Retriever(settings, self.index)
-        # Answers can be a few paragraphs; cap them so a runaway generation ends.
-        self.llm = llm or get_llm(settings, num_predict=700)
+        # Cap answer length: the prompt asks for < 250 words plus reasoning.
+        self.llm = llm or get_llm(settings, num_predict=settings.max_answer_tokens)
 
-    def _finish(self, question: str, text: str, result: RetrievalResult) -> Answer:
+    @property
+    def _general_allowed(self) -> bool:
+        return getattr(self.settings, "allow_general_knowledge", True)
+
+    def _finish(
+        self, question: str, raw: str, result: RetrievalResult, timings: dict | None = None
+    ) -> Answer:
         passages = result.passages
+        mode, text, reasoning = split_reply(raw)
+        if mode == "general" and not self._general_allowed:
+            text = NOT_FOUND
         text = normalize_citations(text, passages)
+        reasoning = normalize_citations(reasoning, passages)
+        cited = cited_passages(text + "\n" + reasoning, passages) if mode == "thesis" else []
         return Answer(
             question=question,
             answer=text,
             sources=[source_dict(i, p) for i, p in enumerate(passages, start=1)],
-            cited=cited_passages(text, passages),
-            not_found=is_not_found(text),
+            cited=cited,
+            mode=mode,
+            reasoning=reasoning,
+            not_found=mode == "general",
             broad=result.broad,
             queries=result.queries,
-            timings={k: round(v, 3) for k, v in result.timings.items()},
+            timings={k: round(v, 3) for k, v in {**result.timings, **(timings or {})}.items()},
         )
 
-    def ask(self, question: str) -> Answer:
-        return self.answer(question, self.retriever.retrieve(question))
+    def _plan(self, question: str, history: list[tuple[str, str]]):
+        """Retrieve (unless it is small talk) and build the prompt."""
+        from .retrieve import RetrievalResult
+
+        history = history[-self.settings.history_turns :] if history else []
+        if is_small_talk(question):
+            result = RetrievalResult(question, [question], False, [], "none", {})
+            return result, build_general_messages(question, history)
+        result = self.retriever.retrieve(retrieval_query(question, history))
+        if not result.passages:
+            return result, build_general_messages(question, history)
+        return result, build_messages(question, result.passages, history)
+
+    def ask(self, question: str, history: list[tuple[str, str]] | None = None) -> Answer:
+        result, messages = self._plan(question, history or [])
+        msg = self.llm.invoke(messages)
+        return self._finish(question, str(msg.content), result)
 
     def answer(self, question: str, result: RetrievalResult) -> Answer:
         """Generate from an existing retrieval (the eval scores retrieval separately)."""
-        if not result.passages:
-            return self._finish(question, NOT_FOUND, result)
-        msg = self.llm.invoke(build_messages(question, result.passages))
-        return self._finish(question, str(msg.content).strip(), result)
+        messages = (
+            build_messages(question, result.passages)
+            if result.passages
+            else build_general_messages(question)
+        )
+        msg = self.llm.invoke(messages)
+        return self._finish(question, str(msg.content), result)
 
-    def ask_stream(self, question: str) -> Iterator[tuple[str, object]]:
-        """Yield ("token", str) events while generating, then one ("done", Answer)."""
-        result = self.retriever.retrieve(question)
-        if not result.passages:
-            yield "token", NOT_FOUND
-            yield "done", self._finish(question, NOT_FOUND, result)
-            return
-        parts: list[str] = []
-        for piece in self.llm.stream(build_messages(question, result.passages)):
+    def ask_stream(
+        self, question: str, history: list[tuple[str, str]] | None = None
+    ) -> Iterator[tuple[str, object]]:
+        """Yield ("mode" | "token" | "reasoning", str) events, then one ("done", Answer)."""
+        t0 = time.perf_counter()
+        result, messages = self._plan(question, history or [])
+        splitter, parts, first = StreamSplitter(), [], None
+        for piece in self.llm.stream(messages):
             token = str(piece.content)
-            if token:
-                parts.append(token)
-                yield "token", token
-        yield "done", self._finish(question, "".join(parts).strip(), result)
+            if not token:
+                continue
+            if first is None:
+                first = time.perf_counter() - t0
+            parts.append(token)
+            yield from splitter.feed(token)
+        yield from splitter.flush()
+        timings = {"first_token": first or 0.0, "answer_total": time.perf_counter() - t0}
+        yield "done", self._finish(question, "".join(parts), result, timings)
 
 
 def main() -> None:
@@ -347,16 +538,24 @@ def main() -> None:
     if args.json:
         print(json.dumps(qa.ask(args.question).to_dict(), indent=2, ensure_ascii=False))
         return
-    answer = None
+    answer, in_reasoning = None, False
     for kind, value in qa.ask_stream(args.question):
-        if kind == "token":
+        if kind == "mode" and value == "general":
+            print("[Not from the thesis: general knowledge]\n")
+        elif kind == "token":
             print(value, end="", flush=True)
-        else:
+        elif kind == "reasoning":
+            if not in_reasoning:
+                print("\n\nReasoning:", end=" ")
+                in_reasoning = True
+            print(value, end="", flush=True)
+        elif kind == "done":
             answer = value
     print("\n\nSources:")
     for src in answer.sources:
         mark = "*" if src["n"] in answer.cited else " "
         print(f" {mark}[{src['n']}] {src['citation']} {src['header']}  (score {src['score']})")
+    print(f"\n{answer.timings}")
 
 
 if __name__ == "__main__":

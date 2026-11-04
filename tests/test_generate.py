@@ -2,15 +2,19 @@ import pytest
 
 from thesis_rag.chunking import Chunk
 from thesis_rag.generate import (
+    GENERAL_MARKER,
     NOT_FOUND,
+    StreamSplitter,
     ThesisQA,
     build_messages,
     citation_tag,
     cited_passages,
     format_context,
     is_not_found,
-    normalize_citations,
+    is_small_talk,
+    retrieval_query,
     source_dict,
+    split_reply,
 )
 from thesis_rag.retrieve import Passage, RetrievalResult
 
@@ -75,7 +79,8 @@ def test_format_context_numbers_and_tags(passages):
 
 def test_build_messages_has_rules_and_question(passages):
     system, user = build_messages("What changed?", passages)
-    assert NOT_FOUND in system.content and "Never invent" in system.content
+    assert GENERAL_MARKER in system.content and "Never invent" in system.content
+    assert "Reasoning:" in system.content
     assert user.content.endswith("Question: What changed?")
 
 
@@ -123,32 +128,107 @@ def test_ask_stream_yields_tokens_then_answer(passages):
     assert answer.not_found and answer.cited == []
 
 
-def test_no_passages_skips_llm():
-    class ExplodingLLM:
-        def invoke(self, *_):
-            raise AssertionError("LLM must not be called")
+def test_no_passages_answers_from_general_knowledge():
+    llm = fake_llm(["GENERAL: Silkworms eat mulberry leaves.\nReasoning:\n- Not in the thesis."])
+    qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever([]), llm=llm)
+    ans = qa.ask("What do silkworms eat?")
+    assert ans.mode == "general" and ans.not_found and ans.cited == []
+    assert (
+        ans.answer == "Silkworms eat mulberry leaves." and ans.reasoning == "- Not in the thesis."
+    )
 
-    qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever([]), llm=ExplodingLLM())
-    assert qa.ask("anything").answer == NOT_FOUND
+
+def test_small_talk_skips_retrieval():
+    class NoRetrieval:
+        def retrieve(self, *_, **__):
+            raise AssertionError("small talk must not search the index")
+
+    qa = ThesisQA(
+        settings=type("S", (), {"history_turns": 2})(),
+        index=object(),
+        retriever=NoRetrieval(),
+        llm=fake_llm(["GENERAL: Hello! Ask me about the thesis.\nReasoning:\n- A greeting."]),
+    )
+    ans = qa.ask("hi!")
+    assert ans.mode == "general" and ans.sources == []
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("Phytophthora [Passage 1, Ch.4 §4.3, p.62].", "Phytophthora [Ch.4 §4.3, p.62]."),
-        ("QD is < 2.0. <claim> [Ch.4 §4.5, p.66].", "QD is < 2.0 [Ch.4 §4.5, p.66]."),
-        ("Yield fell [Passage 3].", "Yield fell [Ch.4 §4.7, p.70]."),
-        ("It is Low (cite as [Ch.4 §4.7, p.70]).", "It is Low [Ch.4 §4.7, p.70]."),
-        ("See [Passage 9] and ref [4].", "See [Passage 9] and ref [4]."),
-        ("Clean [Ch.4 §4.3, p.62].", "Clean [Ch.4 §4.3, p.62]."),
+        (
+            "GATK [Ch.3 §3.7, p.59].\nReasoning:\n- Passage 1 names it.",
+            ("thesis", "GATK [Ch.3 §3.7, p.59].", "- Passage 1 names it."),
+        ),
+        (
+            "GENERAL: Photosynthesis makes sugar.\n\n**Reasoning:**\n- General biology.",
+            ("general", "Photosynthesis makes sugar.", "- General biology."),
+        ),
+        ("Not found in the thesis.", ("general", "Not found in the thesis.", "")),
+        ("Plain answer with no reasoning.", ("thesis", "Plain answer with no reasoning.", "")),
     ],
 )
-def test_normalize_citations(raw, expected, passages):
-    assert normalize_citations(raw, passages) == expected
+def test_split_reply(raw, expected):
+    assert split_reply(raw) == expected
 
 
-def test_answer_is_normalized_before_citations_are_counted(passages):
-    llm = fake_llm(["Yield fell [Passage 2, Ch.4 §4.5, p.66]."])
-    qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever(passages), llm=llm)
-    ans = qa.ask("How did yield change?")
-    assert ans.answer == "Yield fell [Ch.4 §4.5, p.66]." and ans.cited == [2]
+def _run_splitter(tokens):
+    splitter, events = StreamSplitter(), []
+    for t in tokens:
+        events += splitter.feed(t)
+    events += splitter.flush()
+    return events
+
+
+def test_stream_splitter_thesis_answer_then_reasoning():
+    tokens = list("GATK was used [Ch.3 §3.7, p.59].\nReasoning:\n- Passage 1.")
+    events = _run_splitter(tokens)
+    assert events[0] == ("mode", "thesis")
+    text = "".join(v for k, v in events if k == "token")
+    reasoning = "".join(v for k, v in events if k == "reasoning")
+    assert text.strip() == "GATK was used [Ch.3 §3.7, p.59]." and "Reasoning" not in text
+    assert reasoning.strip() == "- Passage 1."
+
+
+def test_stream_splitter_hides_general_marker():
+    events = _run_splitter(["GEN", "ERAL:", " Mulberry is a tree.", "\nReasoning: none"])
+    assert events[0] == ("mode", "general")
+    assert "".join(v for k, v in events if k == "token").strip() == "Mulberry is a tree."
+
+
+@pytest.mark.parametrize("q", ["hi", "Hello!", "thanks", "thank you.", "who are you?"])
+def test_small_talk(q):
+    assert is_small_talk(q)
+
+
+@pytest.mark.parametrize("q", ["Hi, which tool was used for SNP calling?", "What is QD?"])
+def test_not_small_talk(q):
+    assert not is_small_talk(q)
+
+
+def test_retrieval_query_adds_previous_question_for_follow_ups():
+    history = [("Which tool was used for variant calling?", "GATK.")]
+    assert retrieval_query("why that one?", history).startswith("Which tool")
+    assert retrieval_query("What is the QD threshold for filtering SNPs?", history).startswith(
+        "What is the QD"
+    )
+    assert retrieval_query("why?", []) == "why?"
+
+
+def test_history_is_sent_to_the_model(passages):
+    seen = {}
+
+    class Spy:
+        def invoke(self, messages):
+            seen["messages"] = messages
+            return type("M", (), {"content": "More detail [Ch.4 §4.3, p.62]."})()
+
+    qa = ThesisQA(
+        settings=type("S", (), {"history_turns": 1})(),
+        index=object(),
+        retriever=StubRetriever(passages),
+        llm=Spy(),
+    )
+    qa.ask("explain more", history=[("old q", "old a"), ("Which tool?", "GATK.")])
+    contents = [m.content for m in seen["messages"]]
+    assert "Which tool?" in contents and "GATK." in contents and "old q" not in contents

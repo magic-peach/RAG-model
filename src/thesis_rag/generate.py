@@ -357,6 +357,7 @@ _TAG = re.compile(r"\[[^\[\]]{2,80}\]")
 
 
 _PASSAGE_ONLY = re.compile(r"\[(?:passage|source)\s*(\d+)\]", re.IGNORECASE)
+_PASSAGE_PAREN = re.compile(r"\(\s*passage\s*(\d+)\s*\)", re.IGNORECASE)
 _PASSAGE_PREFIX = re.compile(r"\[(?:passage|source)\s*\d+\s*[,:;\u2013-]\s*", re.IGNORECASE)
 
 
@@ -377,6 +378,7 @@ def normalize_citations(answer: str, passages: list[Passage]) -> str:
     text = re.sub(r"\(\s*cite as\s*(\[[^\[\]]+\])\s*\)", r"\1", text, flags=re.IGNORECASE)
     text = _PASSAGE_PREFIX.sub("[", text)
     text = _PASSAGE_ONLY.sub(by_number, text)
+    text = _PASSAGE_PAREN.sub(by_number, text)  # "(Passage 2)" -> its tag
     text = re.sub(r"\.\s+\[", " [", text)  # "fact. [tag]." -> "fact [tag]."
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 

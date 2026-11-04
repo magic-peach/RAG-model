@@ -6,7 +6,7 @@ is how the evaluation compares configurations)::
     question ──► [multi-query: + 3 LLM rephrasings]
              ──► for each query: dense top-20 (Chroma) and BM25 top-20
              ──► Reciprocal Rank Fusion  ──► top-20 candidates
-             ──► cross-encoder rerank (bge-reranker-base) against the question
+             ──► cross-encoder rerank (MiniLM ms-marco) against the question
              ──► one passage per parent  ──► top-5 passages
 
 Why hybrid: dense embeddings match meaning ("water deficit" ~ "drought") but
@@ -88,9 +88,9 @@ def is_broad(question: str) -> bool:
 
 
 class CrossEncoderReranker:
-    """BAAI/bge-reranker-base via sentence-transformers, loaded on first use.
+    """Cross-encoder reranker via sentence-transformers, loaded on first use.
 
-    The model (~1 GB) is downloaded from Hugging Face once and then runs
+    The model is downloaded from Hugging Face once and then runs
     locally; tests replace this class with a fake so CI never downloads it.
     """
 
@@ -101,16 +101,19 @@ class CrossEncoderReranker:
 
     def _load(self):
         if self._model is None:
+            import torch
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self.model_name, max_length=self.max_length)
+            # Force a sigmoid so every reranker reports a 0-1 relevance score
+            # (bge applies one by default, the MiniLM ms-marco models do not).
+            self._model = CrossEncoder(
+                self.model_name, max_length=self.max_length, activation_fn=torch.nn.Sigmoid()
+            )
         return self._model
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         if not texts:
             return []
-        # bge-reranker has a single output; sentence-transformers applies a
-        # sigmoid to it, so scores are relevance probabilities in [0, 1].
         return [float(s) for s in self._load().predict([(query, t) for t in texts])]
 
 

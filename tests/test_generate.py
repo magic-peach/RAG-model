@@ -12,6 +12,7 @@ from thesis_rag.generate import (
     format_context,
     is_not_found,
     is_small_talk,
+    normalize_citations,
     retrieval_query,
     source_dict,
     split_reply,
@@ -232,3 +233,26 @@ def test_history_is_sent_to_the_model(passages):
     qa.ask("explain more", history=[("old q", "old a"), ("Which tool?", "GATK.")])
     contents = [m.content for m in seen["messages"]]
     assert "Which tool?" in contents and "GATK." in contents and "old q" not in contents
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Phytophthora [Passage 1, Ch.4 §4.3, p.62].", "Phytophthora [Ch.4 §4.3, p.62]."),
+        ("QD is < 2.0. <claim> [Ch.4 §4.5, p.66].", "QD is < 2.0 [Ch.4 §4.5, p.66]."),
+        ("Yield fell [Passage 3].", "Yield fell [Ch.4 §4.7, p.70]."),
+        ("It is Low (cite as [Ch.4 §4.7, p.70]).", "It is Low [Ch.4 §4.7, p.70]."),
+        ("It removed duplicates (Passage 2).", "It removed duplicates [Ch.4 §4.5, p.66]."),
+        ("See [Passage 9] and ref [4].", "See [Passage 9] and ref [4]."),
+        ("Clean [Ch.4 §4.3, p.62].", "Clean [Ch.4 §4.3, p.62]."),
+    ],
+)
+def test_normalize_citations(raw, expected, passages):
+    assert normalize_citations(raw, passages) == expected
+
+
+def test_answer_is_normalized_before_citations_are_counted(passages):
+    llm = fake_llm(["Yield fell [Passage 2, Ch.4 §4.5, p.66]."])
+    qa = ThesisQA(settings=None, index=object(), retriever=StubRetriever(passages), llm=llm)
+    ans = qa.ask("How did yield change?")
+    assert ans.answer == "Yield fell [Ch.4 §4.5, p.66]." and ans.cited == [2]

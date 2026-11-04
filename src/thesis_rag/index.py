@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -466,6 +467,9 @@ class Index:
         self._bm25 = BM25Okapi([bm25_tokenize(self.chunks[i].embed_text) for i in self._ids])
         self._embedder = embedder
         self._collection = None
+        # The API's warm-up thread and the first request can arrive together;
+        # loading the model or opening Chroma twice at once fails, so serialise it.
+        self._load_lock = threading.RLock()
 
     @classmethod
     def exists(cls, settings: Settings) -> bool:
@@ -473,15 +477,17 @@ class Index:
 
     @property
     def embedder(self) -> Embedder:
-        if self._embedder is None:
-            self._embedder = Embedder(self.settings)
-        return self._embedder
+        with self._load_lock:
+            if self._embedder is None:
+                self._embedder = Embedder(self.settings)
+            return self._embedder
 
     @property
     def collection(self):
-        if self._collection is None:
-            self._collection = _chroma_client(self.dir).get_collection(COLLECTION)
-        return self._collection
+        with self._load_lock:
+            if self._collection is None:
+                self._collection = _chroma_client(self.dir).get_collection(COLLECTION)
+            return self._collection
 
     def dense_search(self, query: str, k: int, types: list[str] | None = None) -> list[Hit]:
         where = {"chunk_type": {"$in": types}} if types else None

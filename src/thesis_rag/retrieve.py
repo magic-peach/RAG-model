@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -106,13 +107,15 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str):
         self.model_name = _RERANKER_ALIASES.get(model_name, model_name)
         self._model = None
+        self._lock = threading.Lock()
 
     def _load(self):
-        if self._model is None:
-            from fastembed.rerank.cross_encoder import TextCrossEncoder
+        with self._lock:  # warm-up and the first request may arrive together
+            if self._model is None:
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-            self._model = TextCrossEncoder(self.model_name)
-        return self._model
+                self._model = TextCrossEncoder(self.model_name)
+            return self._model
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         if not texts:

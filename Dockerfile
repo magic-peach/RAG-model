@@ -11,12 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# CPU-only torch first (the default wheel bundles CUDA and is several GB).
-RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
-
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install .
+RUN pip install ".[deploy]"
 
 COPY web ./web
 COPY config.yaml ./

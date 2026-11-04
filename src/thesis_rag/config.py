@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     use_bm25: bool = True
     use_reranker: bool = True
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     use_multi_query: bool = False
     num_query_variants: int = 3
     use_parent_context: bool = True

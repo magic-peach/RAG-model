@@ -32,6 +32,7 @@ of it.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -87,34 +88,38 @@ def is_broad(question: str) -> bool:
     return bool(_BROAD.search(question))
 
 
-class CrossEncoderReranker:
-    """Cross-encoder reranker via sentence-transformers, loaded on first use.
+# sentence-transformers names for the same weights, accepted for convenience.
+_RERANKER_ALIASES = {
+    "cross-encoder/ms-marco-MiniLM-L-6-v2": "Xenova/ms-marco-MiniLM-L-6-v2",
+    "cross-encoder/ms-marco-MiniLM-L-12-v2": "Xenova/ms-marco-MiniLM-L-12-v2",
+}
 
-    The model is downloaded from Hugging Face once and then runs
+
+class CrossEncoderReranker:
+    """Cross-encoder reranker run as ONNX by fastembed, loaded on first use.
+
+    ONNX Runtime needs no PyTorch, which keeps the install and the Docker
+    image small. The model is downloaded from Hugging Face once and then runs
     locally; tests replace this class with a fake so CI never downloads it.
     """
 
-    def __init__(self, model_name: str, max_length: int = 512):
-        self.model_name = model_name
-        self.max_length = max_length
+    def __init__(self, model_name: str):
+        self.model_name = _RERANKER_ALIASES.get(model_name, model_name)
         self._model = None
 
     def _load(self):
         if self._model is None:
-            import torch
-            from sentence_transformers import CrossEncoder
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-            # Force a sigmoid so every reranker reports a 0-1 relevance score
-            # (bge applies one by default, the MiniLM ms-marco models do not).
-            self._model = CrossEncoder(
-                self.model_name, max_length=self.max_length, activation_fn=torch.nn.Sigmoid()
-            )
+            self._model = TextCrossEncoder(self.model_name)
         return self._model
 
     def score(self, query: str, texts: list[str]) -> list[float]:
         if not texts:
             return []
-        return [float(s) for s in self._load().predict([(query, t) for t in texts])]
+        logits = self._load().rerank(query, texts)
+        # A sigmoid turns the raw logits into 0-1 relevance scores for display.
+        return [1.0 / (1.0 + math.exp(-float(x))) for x in logits]
 
 
 @lru_cache(maxsize=2)

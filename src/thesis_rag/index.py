@@ -75,29 +75,43 @@ def with_retry(fn: Callable, attempts: int = 4, wait: float = 15.0):
 
 
 class Embedder:
-    """Ollama embeddings with the task prefixes nomic-embed-text was trained with.
+    """nomic-embed-text with the task prefixes it was trained with.
 
     nomic-embed-text expects "search_document: " on indexed text and
     "search_query: " on queries; without them retrieval quality drops
-    noticeably. Other models get the raw text.
+    noticeably. Locally the model is served by Ollama; the hosted demo loads
+    the same weights (nomic-embed-text-v1.5) through sentence-transformers so
+    queries match the vectors that were indexed with Ollama.
     """
 
     def __init__(self, settings: Settings):
-        from langchain_ollama import OllamaEmbeddings
+        self._provider = settings.embedding_provider
+        if self._provider == "sentence-transformers":
+            from sentence_transformers import SentenceTransformer
 
-        self._model = OllamaEmbeddings(
-            model=settings.embedding_model, base_url=settings.ollama_base_url
-        )
-        self._prefixed = "nomic" in settings.embedding_model
+            self._st = SentenceTransformer(settings.st_embedding_model, trust_remote_code=True)
+            self._prefixed = True
+        else:
+            from langchain_ollama import OllamaEmbeddings
+
+            self._model = OllamaEmbeddings(
+                model=settings.embedding_model, base_url=settings.ollama_base_url
+            )
+            self._prefixed = "nomic" in settings.embedding_model
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        if self._provider == "sentence-transformers":
+            return self._st.encode(texts, normalize_embeddings=True).tolist()
+        return with_retry(lambda: self._model.embed_documents(texts))
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if self._prefixed:
             texts = [f"search_document: {t}" for t in texts]
-        return with_retry(lambda: self._model.embed_documents(texts))
+        return self._embed(texts)
 
     def embed_query(self, text: str) -> list[float]:
         query = f"search_query: {text}" if self._prefixed else text
-        return with_retry(lambda: self._model.embed_query(query))
+        return self._embed([query])[0]
 
 
 # ---------------------------------------------------------------------------

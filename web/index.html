@@ -3,102 +3,151 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>Thesis RAG</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='35%25' cy='30%25'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.45' stop-color='%23a78bfa'/%3E%3Cstop offset='1' stop-color='%23ec4899'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='14' fill='url(%23g)'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to content</a>
+    <a class="skip-link" href="#composer-input">Skip to the question box</a>
+    <div class="backdrop" aria-hidden="true"></div>
 
-    <header class="topbar">
-      <div class="brand">
-        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M6 3h9l4 4v14H6z M15 3v4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-          <path d="M9 12h7M9 15.5h7M9 8.5h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-        </svg>
-        <div class="brand-text">
-          <span class="eyebrow">Thesis RAG</span>
-          <h1 id="doc-name">Loading…</h1>
+    <div class="app" id="app">
+      <!-- Sidebar: brand, new chat, analyze, search, saved chats, document -->
+      <aside class="sidebar" id="sidebar" aria-label="Chats">
+        <div class="sidebar-top">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-name">Thesis RAG</span>
+          </div>
+          <button class="icon-btn" id="collapse-btn" type="button" aria-label="Close sidebar" data-icon="panel"></button>
         </div>
-      </div>
-      <div class="topbar-actions">
-        <span id="status-pill" class="pill" role="status" aria-live="polite">
-          <span class="dot" aria-hidden="true"></span><span id="status-text">Checking…</span>
-        </span>
-        <label class="button button-quiet" id="upload-label" hidden>
-          <input type="file" id="pdf-input" accept="application/pdf,.pdf" class="sr-only" />
-          Upload PDF
+
+        <button class="new-chat" id="new-chat" type="button"><span data-icon="plus"></span>New chat</button>
+        <button class="nav-item" id="analyze-nav" type="button"><span data-icon="chart"></span>Analyze data</button>
+
+        <label class="search">
+          <span data-icon="search" aria-hidden="true"></span>
+          <span class="sr-only">Search chats</span>
+          <input id="chat-search" type="search" placeholder="Search chats…" autocomplete="off" />
         </label>
-      </div>
-    </header>
 
-    <div class="tabs" role="tablist" aria-label="Mode">
-      <button role="tab" id="tab-ask" aria-controls="panel-ask" aria-selected="true">Ask the thesis</button>
-      <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="false" tabindex="-1">
-        Analyze new data
-      </button>
-    </div>
+        <div class="chats-label">Chats</div>
+        <nav class="chat-list" id="chat-list" aria-label="Saved chats"></nav>
 
-    <main id="main" class="layout">
-      <section id="panel-ask" class="panel" role="tabpanel" aria-labelledby="tab-ask">
-        <div id="chat" class="chat" aria-live="polite">
-          <div class="empty" id="chat-empty">
-            <h2>Ask anything about the thesis</h2>
-            <p>Answers come only from the document, with a page citation for every claim.</p>
-            <div class="examples">
-              <button type="button" class="example">What is the main contribution of this thesis?</button>
-              <button type="button" class="example">Which tool was used for variant calling?</button>
-              <button type="button" class="example">What filtering thresholds were applied to SNPs?</button>
-            </div>
+        <div class="doc-card" id="doc-card">
+          <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+          <div class="doc-text">
+            <div class="doc-title" id="doc-title">Loading…</div>
+            <div class="doc-sub" id="doc-sub" role="status" aria-live="polite">Checking status</div>
           </div>
-        </div>
-        <form id="ask-form" class="composer">
-          <label for="question" class="sr-only">Your question</label>
-          <textarea id="question" rows="2" maxlength="1000" placeholder="Ask about methods, results, thresholds…" required></textarea>
-          <button type="submit" id="ask-btn" class="button button-primary">Ask</button>
-        </form>
-        <p class="hint">Enter to send · Shift+Enter for a new line</p>
-      </section>
-
-      <section id="panel-analyze" class="panel" role="tabpanel" aria-labelledby="tab-analyze" hidden>
-        <form id="analyze-form" class="analyze-form">
-          <label class="dropzone" id="dropzone">
-            <input type="file" id="csv-input" accept=".csv,text/csv,.tsv,text/tab-separated-values" class="sr-only" required />
-            <span class="dropzone-title" id="csv-name">Choose a CSV file</span>
-            <span class="dropzone-sub">or drop it here · up to 5 MB</span>
+          <label class="icon-btn" id="upload-label" title="Index a PDF" hidden>
+            <input type="file" id="pdf-input" accept="application/pdf,.pdf" class="sr-only" />
+            <span data-icon="upload"></span><span class="sr-only">Upload a PDF</span>
           </label>
-          <div class="field-row">
-            <label class="field">
-              <span>Compare groups by</span>
-              <select id="group-col">
-                <option value="">Detect automatically</option>
-              </select>
-            </label>
-            <label class="check">
-              <input type="checkbox" id="explain" checked />
-              Explain with the thesis
-            </label>
-            <button type="submit" id="analyze-btn" class="button button-primary">Analyze</button>
-          </div>
-        </form>
-        <div id="analyze-out">
-          <div class="empty">
-            <h2>Check new data against the thesis</h2>
-            <p>
-              Statistics are computed with pandas and SciPy, then explained against the thesis with
-              citations. Columns named like a thesis threshold (for example <code>QD</code> or
-              <code>MQ</code>) are checked against it.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <aside class="sources" aria-labelledby="sources-title">
-        <h2 id="sources-title">Sources</h2>
-        <div id="sources-list">
-          <p class="muted">Passages used for an answer appear here. Select a citation to highlight its passage.</p>
         </div>
       </aside>
-    </main>
+
+      <!-- Main column -->
+      <main class="main" id="main">
+        <header class="topbar">
+          <button class="icon-btn" id="open-sidebar" type="button" aria-label="Open sidebar" data-icon="menu"></button>
+          <div class="topbar-title" id="topbar-title"></div>
+          <div class="topbar-actions">
+            <button class="icon-btn round" id="theme-btn" type="button" aria-label="Toggle dark mode" data-icon="moon"></button>
+            <button class="icon-btn round" id="sources-btn" type="button" aria-label="Show sources" aria-expanded="false" aria-controls="drawer" data-icon="book"></button>
+          </div>
+        </header>
+
+        <!-- Ask view -->
+        <section class="view" id="ask-view" aria-label="Ask the thesis">
+          <div class="scroll" id="scroll">
+            <div class="hero" id="hero">
+              <div class="orb" aria-hidden="true"><span></span></div>
+              <p class="hero-hello">Hey there <span aria-hidden="true">👋</span></p>
+              <h1 class="hero-title">What would you like to know?</h1>
+              <p class="hero-doc" id="hero-doc"></p>
+              <div class="suggestions" id="suggestions">
+                <button type="button" class="suggestion"><span data-icon="sparkle"></span>What is this thesis about?</button>
+                <button type="button" class="suggestion"><span data-icon="flask"></span>Which tool was used for variant calling?</button>
+                <button type="button" class="suggestion"><span data-icon="filter"></span>What thresholds were used to filter SNPs?</button>
+                <button type="button" class="suggestion"><span data-icon="leaf"></span>How does drought affect mulberry?</button>
+              </div>
+            </div>
+            <div class="thread" id="thread" aria-live="polite"></div>
+          </div>
+
+          <form class="composer-wrap" id="ask-form">
+            <div class="composer">
+              <label for="composer-input" class="sr-only">Ask a question</label>
+              <textarea id="composer-input" rows="1" maxlength="1000" placeholder="Ask anything about the thesis…"></textarea>
+              <div class="composer-row">
+                <button type="button" class="icon-btn round soft" id="attach-btn" aria-label="Analyze a CSV file" title="Analyze a CSV file" data-icon="plus"></button>
+                <span class="model-pill" id="model-pill" title="Model answering your questions"><span class="pill-dot"></span><span id="model-name">Llama 3.1 8B</span></span>
+                <span class="composer-spacer"></span>
+                <button type="submit" class="send" id="send-btn" aria-label="Send"><span data-icon="send"></span></button>
+              </div>
+            </div>
+            <p class="disclaimer">Answers cite the thesis by page. Anything marked <em>Not from the thesis</em> is general knowledge.</p>
+          </form>
+        </section>
+
+        <!-- Analyze view -->
+        <section class="view" id="analyze-view" aria-label="Analyze new data" hidden>
+          <div class="scroll">
+            <div class="analyze">
+              <div class="analyze-head">
+                <div class="orb small" aria-hidden="true"><span></span></div>
+                <div>
+                  <h1>Analyze new data</h1>
+                  <p>Upload a CSV. Statistics are computed with pandas and SciPy, then explained against the thesis with citations.</p>
+                </div>
+              </div>
+              <form id="analyze-form" class="glass analyze-form">
+                <label class="dropzone" id="dropzone">
+                  <input type="file" id="csv-input" accept=".csv,text/csv,.tsv,text/tab-separated-values" class="sr-only" />
+                  <span data-icon="upload" class="drop-icon"></span>
+                  <span class="drop-title" id="csv-name">Drop a CSV here or browse</span>
+                  <span class="drop-sub">Up to 5 MB · columns named like a thesis threshold (QD, MQ, FS…) are checked against it</span>
+                </label>
+                <div class="field-row">
+                  <label class="field">
+                    <span>Compare groups by</span>
+                    <select id="group-col"><option value="">Detect automatically</option></select>
+                  </label>
+                  <label class="check"><input type="checkbox" id="explain" checked /> Explain with the thesis</label>
+                  <button type="submit" class="primary" id="analyze-btn">Analyze</button>
+                </div>
+              </form>
+              <div id="analyze-out"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Sources drawer -->
+      <aside class="drawer" id="drawer" aria-label="Sources" hidden>
+        <div class="drawer-head">
+          <h2>Sources</h2>
+          <button class="icon-btn" id="close-drawer" type="button" aria-label="Close sources" data-icon="close"></button>
+        </div>
+        <div class="drawer-body" id="sources-list">
+          <p class="muted">Passages behind an answer appear here. Select a citation to highlight its passage.</p>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Delete confirmation (no blocking browser dialogs) -->
+    <div class="modal" id="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+      <div class="modal-card glass">
+        <h2 id="confirm-title">Delete chat?</h2>
+        <p id="confirm-text">This removes the chat and its answers.</p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="confirm-cancel">Cancel</button>
+          <button type="button" class="danger" id="confirm-ok">Delete</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

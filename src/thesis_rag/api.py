@@ -8,9 +8,12 @@ GET  /healthz   liveness for Docker; never touches Ollama or the index
 GET  /status    document name, index counts, ingest progress, Ollama state (ok/busy/offline)
 POST /ingest    upload a PDF (or name a server-side path); builds the index in a
                 background thread and reports progress through /status
-POST /ask       {"question": ...} -> Server-Sent Events: "token" events while the
-                answer streams, then one "answer" event with sources, then "done"
+POST /ask       {"question", "chat_id"?} -> Server-Sent Events: "chat" (when a new
+                chat was created), "mode" (thesis | general), "token" and
+                "reasoning" while streaming, one "answer" with sources, "done"
 POST /analyze   CSV upload -> statistics, then the grounded explanation
+GET/POST/PATCH/DELETE /chats[/{id}]
+                saved chats, scoped to the browser's X-Client-Id header
 
 Heavy objects (index, reranker, LLM client) are created on first use and
 rebuilt after an ingest, so the server starts instantly and tests can swap
@@ -28,10 +31,11 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -46,6 +50,23 @@ MAX_PDF_BYTES = 100_000_000
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
+    chat_id: str | None = None
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+_CLIENT_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+
+
+def _owner(client_id: str | None, required: bool = True) -> str | None:
+    """The browser's random id (see store.py); malformed or missing ids are refused."""
+    if client_id and _CLIENT_ID.match(client_id):
+        return client_id
+    if required:
+        raise HTTPException(400, "Missing or invalid X-Client-Id header")
+    return None
 
 
 class IngestJob:
@@ -83,7 +104,29 @@ class AppState:
         self._build_fn = build_fn
         self._qa = None
         self._qa_lock = threading.Lock()
+        self._store = None
         self.job = IngestJob()
+
+    @property
+    def store(self):
+        if self._store is None:
+            from .store import ChatStore
+
+            self._store = ChatStore(self.settings.data_dir / "chats.db")
+        return self._store
+
+    def warm_up(self) -> None:
+        """Load the index, reranker and model before the first question arrives."""
+        if not self.indexed():
+            return
+        t0 = time.perf_counter()
+        try:
+            qa = self.qa()
+            qa.retriever.retrieve("warm up")
+            qa.llm.invoke("Reply with OK.")
+            log.info("Warm-up finished in %.1f s", time.perf_counter() - t0)
+        except Exception:  # warm-up is best effort; the first question will retry
+            log.warning("Warm-up failed", exc_info=True)
 
     # --- lazy QA pipeline -------------------------------------------------
     def indexed(self) -> bool:
@@ -164,9 +207,17 @@ def create_app(
     qa_factory: Callable[[Settings], object] | None = None,
     build_fn: Callable | None = None,
     check_ollama: Callable[[str], str] = _ollama_status,
+    warm_up: bool = False,
 ) -> FastAPI:
     state = AppState(settings or get_settings(), qa_factory, build_fn)
-    app = FastAPI(title="Thesis RAG", version="2.0.0")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if warm_up:  # in a thread, so the server accepts requests immediately
+            threading.Thread(target=state.warm_up, name="warm-up", daemon=True).start()
+        yield
+
+    app = FastAPI(title="Thesis RAG", version="2.1.0", lifespan=lifespan)
     app.state.rag = state
 
     @app.get("/healthz")
@@ -192,9 +243,12 @@ def create_app(
             },
             "ingest": state.job.to_dict(),
             "knowledge_card": None if card is None else {"reviewed": bool(card.get("reviewed"))},
-            "ollama": check_ollama(s.ollama_base_url),
+            # The hosted demo has no Ollama; its model is reached through Groq.
+            "ollama": check_ollama(s.ollama_base_url) if s.llm_provider == "ollama" else "ok",
+            "ingest_enabled": s.allow_ingest,
             "settings": {
-                "llm_model": s.llm_model,
+                "llm_provider": s.llm_provider,
+                "llm_model": s.groq_model if s.llm_provider == "groq" else s.llm_model,
                 "embedding_model": s.embedding_model,
                 "use_bm25": s.use_bm25,
                 "use_reranker": s.use_reranker,
@@ -209,6 +263,8 @@ def create_app(
         path: Annotated[str | None, Form()] = None,
         force: Annotated[bool, Form()] = False,
     ) -> dict:
+        if not state.settings.allow_ingest:
+            raise HTTPException(403, "Uploading documents is disabled on this deployment")
         if file is not None:
             data = await file.read()
             if len(data) > MAX_PDF_BYTES:
@@ -231,31 +287,81 @@ def create_app(
         return {"status": "started", "source": pdf_path.name}
 
     @app.post("/ask")
-    def ask(req: AskRequest) -> StreamingResponse:
+    def ask(
+        req: AskRequest, x_client_id: Annotated[str | None, Header()] = None
+    ) -> StreamingResponse:
         if not state.indexed():
             raise HTTPException(409, "No document is indexed yet; POST /ingest first")
-        qa = state.qa()
+        owner = _owner(x_client_id, required=False)
         question = req.question.strip()
+        store = state.store if owner else None
+        chat_id, new_chat = req.chat_id, None
+        if store is not None:
+            if chat_id and store.get_chat(owner, chat_id) is None:
+                raise HTTPException(404, "Chat not found")
+            if not chat_id:
+                from .store import title_from
+
+                new_chat = store.create_chat(owner, title_from(question))
+                chat_id = new_chat["id"]
+        history = store.history(owner, chat_id, state.settings.history_turns) if store else []
+        qa = state.qa()
 
         def events() -> Iterator[str]:
             try:
-                for kind, value in qa.ask_stream(question):
-                    if kind == "token":
-                        yield _sse("token", {"text": value})
-                    else:
-                        yield _sse("answer", value.to_dict())
+                if new_chat:
+                    yield _sse("chat", {"id": new_chat["id"], "title": new_chat["title"]})
+                for kind, value in qa.ask_stream(question, history):
+                    if kind == "done":
+                        answer = value.to_dict()
+                        if store is not None:
+                            store.add_exchange(owner, chat_id, question, answer)
+                        yield _sse("answer", {**answer, "chat_id": chat_id})
+                    elif kind == "mode":
+                        yield _sse("mode", {"mode": value})
+                    else:  # "token" (answer text) or "reasoning"
+                        yield _sse(kind, {"text": value})
                 yield _sse("done", {})
             except Exception as exc:  # the HTTP status is already sent; report in-band
                 log.exception("Answer failed")
                 yield _sse("error", {"message": _friendly_error(exc)})
 
         # Sync generator: Starlette iterates it in a worker thread, so the blocking
-        # Ollama stream does not stall the event loop.
+        # model stream does not stall the event loop.
         return StreamingResponse(
             events(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # --- saved chats -------------------------------------------------------
+    @app.get("/chats")
+    def list_chats(x_client_id: Annotated[str | None, Header()] = None, q: str = "") -> list[dict]:
+        return state.store.list_chats(_owner(x_client_id), q.strip())
+
+    @app.post("/chats", status_code=201)
+    def create_chat(x_client_id: Annotated[str | None, Header()] = None) -> dict:
+        return state.store.create_chat(_owner(x_client_id))
+
+    @app.get("/chats/{chat_id}")
+    def get_chat(chat_id: str, x_client_id: Annotated[str | None, Header()] = None) -> dict:
+        chat = state.store.get_chat(_owner(x_client_id), chat_id)
+        if chat is None:
+            raise HTTPException(404, "Chat not found")
+        return chat
+
+    @app.patch("/chats/{chat_id}")
+    def rename_chat(
+        chat_id: str, req: RenameRequest, x_client_id: Annotated[str | None, Header()] = None
+    ) -> dict:
+        if not state.store.rename_chat(_owner(x_client_id), chat_id, req.title):
+            raise HTTPException(404, "Chat not found")
+        return {"id": chat_id, "title": " ".join(req.title.split())}
+
+    @app.delete("/chats/{chat_id}", status_code=204)
+    def delete_chat(chat_id: str, x_client_id: Annotated[str | None, Header()] = None) -> None:
+        if not state.store.delete_chat(_owner(x_client_id), chat_id):
+            raise HTTPException(404, "Chat not found")
 
     @app.post("/analyze")
     def analyze(
@@ -292,11 +398,13 @@ def create_app(
 def _friendly_error(exc: Exception) -> str:
     text = str(exc)
     if "Connection refused" in text or "ConnectError" in type(exc).__name__:
-        return "Cannot reach Ollama. Is it running (ollama serve)?"
+        return "Cannot reach the language model. Is Ollama running (ollama serve)?"
+    if "rate limit" in text.lower() or "429" in text:
+        return "The model is rate-limited right now; please try again in a minute."
     return text or type(exc).__name__
 
 
-app = create_app()
+app = create_app(warm_up=os.environ.get("RAG_WARMUP", "1") != "0")
 
 
 def main() -> None:

@@ -144,8 +144,9 @@ Ollama:
 
 The answer streams, so reading starts at the first words. Ollama keeps the
 model loaded between questions (`keep_alive`), and the server warms the index,
-reranker and model up at startup. On the hosted demo, Groq generates the whole
-answer in about a second.
+reranker and model up at startup. On the hosted demo (Fly.io + Groq), measured
+end to end: thesis questions finish in about 4–7 s (retrieval on a shared CPU
+is most of it; generation takes under a second), greetings in about 1 s.
 
 ## API
 

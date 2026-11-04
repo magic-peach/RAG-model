@@ -178,3 +178,5 @@ data/raw/
 data/index/
 data/cache/
 data/knowledge_card.json
+# Saved chats (SQLite)
+data/chats.db*

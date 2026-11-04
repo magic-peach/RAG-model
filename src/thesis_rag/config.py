@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     fastembed_model: str = "nomic-ai/nomic-embed-text-v1.5"
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "llama3.1:8b"
-    groq_model: str = "llama-3.1-8b-instant"
+    # Groq no longer serves Llama 3.1; gpt-oss-20b is an open-weight model of a
+    # similar size that it does serve, with fast first tokens (~1 s).
+    groq_model: str = "openai/gpt-oss-20b"
     embedding_model: str = "nomic-embed-text"
     num_ctx: int = Field(8192, description="Ollama context window for generation")
     temperature: float = 0.1

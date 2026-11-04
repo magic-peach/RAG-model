@@ -131,6 +131,8 @@ let statusTimer = null;
 function prettyModel(name) {
   if (/llama[-_.]?3\.1[-_:]?8b/i.test(name)) return "Llama 3.1 8B";
   if (/llama[-_.]?3\.2[-_:]?3b/i.test(name)) return "Llama 3.2 3B";
+  if (/gpt-oss-20b/i.test(name)) return "gpt-oss 20B";
+  if (/gpt-oss-120b/i.test(name)) return "gpt-oss 120B";
   return name || "Local model";
 }
 

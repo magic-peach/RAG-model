@@ -38,8 +38,17 @@ def get_llm(settings: Settings, **overrides) -> BaseChatModel:
             "temperature": overrides.get("temperature", settings.temperature),
             "max_tokens": overrides.get("num_predict", settings.max_answer_tokens),
         }
+        model_kwargs: dict = {}
         if overrides.get("format") == "json":
-            params["model_kwargs"] = {"response_format": {"type": "json_object"}}
+            model_kwargs["response_format"] = {"type": "json_object"}
+        if "gpt-oss" in settings.groq_model:
+            # A reasoning model: keep its hidden reasoning short (speed) and out of
+            # the reply; it still counts against max_tokens, so allow for it.
+            params["reasoning_effort"] = "low"
+            model_kwargs["include_reasoning"] = False
+            params["max_tokens"] += 400
+        if model_kwargs:
+            params["model_kwargs"] = model_kwargs
         return ChatGroq(**params)
 
     from langchain_ollama import ChatOllama

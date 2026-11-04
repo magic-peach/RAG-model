@@ -79,17 +79,16 @@ class Embedder:
 
     nomic-embed-text expects "search_document: " on indexed text and
     "search_query: " on queries; without them retrieval quality drops
-    noticeably. Locally the model is served by Ollama; the hosted demo loads
-    the same weights (nomic-embed-text-v1.5) through sentence-transformers so
-    queries match the vectors that were indexed with Ollama.
+    noticeably. Locally the model is served by Ollama; the hosted demo runs
+    the same weights through fastembed (ONNX), which needs no model server.
     """
 
     def __init__(self, settings: Settings):
-        self._provider = settings.embedding_provider
-        if self._provider == "sentence-transformers":
-            from sentence_transformers import SentenceTransformer
+        self._fastembed = None
+        if settings.embedding_provider == "fastembed":
+            from fastembed import TextEmbedding  # optional dependency: pip install ".[deploy]"
 
-            self._st = SentenceTransformer(settings.st_embedding_model, trust_remote_code=True)
+            self._fastembed = TextEmbedding(settings.fastembed_model)
             self._prefixed = True
         else:
             from langchain_ollama import OllamaEmbeddings
@@ -100,8 +99,8 @@ class Embedder:
             self._prefixed = "nomic" in settings.embedding_model
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        if self._provider == "sentence-transformers":
-            return self._st.encode(texts, normalize_embeddings=True).tolist()
+        if self._fastembed is not None:
+            return [v.tolist() for v in self._fastembed.embed(texts)]
         return with_retry(lambda: self._model.embed_documents(texts))
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -110,8 +109,7 @@ class Embedder:
         return self._embed(texts)
 
     def embed_query(self, text: str) -> list[float]:
-        query = f"search_query: {text}" if self._prefixed else text
-        return self._embed([query])[0]
+        return self._embed([f"search_query: {text}" if self._prefixed else text])[0]
 
 
 # ---------------------------------------------------------------------------

@@ -296,9 +296,20 @@ def split_reply(raw: str) -> tuple[str, str, str]:
     elif is_not_found(text):  # an older-style refusal still counts as off-thesis
         mode = "general"
     m = re.search(r"\n?\s*\**\s*reasoning\s*\**\s*:\s*\**", text, re.IGNORECASE)
-    if m:
-        return mode, text[: m.start()].strip(), text[m.end() :].strip()
-    return mode, text, ""
+    answer, reasoning = (text[: m.start()], text[m.end() :]) if m else (text, "")
+    return mode, mark_general(answer.strip()), reasoning.strip()
+
+
+def mark_general(text: str) -> str:
+    """Background the model adds mid-answer as "(GENERAL: ...)" or a "GENERAL:" line
+    is rewritten to the "(general knowledge)" label the UI shows as a tag."""
+    text = re.sub(
+        r"\(\s*GENERAL:\s*(.*?)\)",
+        lambda g: f"{g.group(1).strip()} (general knowledge)",
+        text,
+        flags=re.DOTALL,
+    )
+    return re.sub(r"(?m)^\s*GENERAL:\s*(.+)$", r"\1 (general knowledge)", text)
 
 
 class StreamSplitter:

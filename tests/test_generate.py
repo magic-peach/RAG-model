@@ -167,6 +167,15 @@ def test_small_talk_skips_retrieval():
         ),
         ("Not found in the thesis.", ("general", "Not found in the thesis.", "")),
         ("Plain answer with no reasoning.", ("thesis", "Plain answer with no reasoning.", "")),
+        (
+            "Fed on leaves [Ch.1 §1.3, p.18].\n\n(GENERAL: Silkworms are domesticated.)",
+            (
+                "thesis",
+                "Fed on leaves [Ch.1 §1.3, p.18].\n\nSilkworms are domesticated. "
+                "(general knowledge)",
+                "",
+            ),
+        ),
     ],
 )
 def test_split_reply(raw, expected):

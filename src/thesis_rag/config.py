@@ -35,18 +35,17 @@ class Settings(BaseSettings):
 
     # --- Models ---
     # Locally everything runs on Ollama. The hosted demo uses Groq for generation
-    # (same Llama 3.1 8B, much faster) and sentence-transformers for query
-    # embeddings, because a free CPU host cannot run an 8B model.
+    # (the same Llama 3.1 8B, much faster) because a free CPU host cannot run an
+    # 8B model, and fastembed for query embeddings: its ONNX export of
+    # nomic-embed-text v1.5 gives the same vectors as Ollama's (cosine 1.0), so
+    # it can search an index that was built with Ollama.
     llm_provider: Literal["ollama", "groq"] = "ollama"
-    embedding_provider: Literal["ollama", "sentence-transformers"] = "ollama"
+    embedding_provider: Literal["ollama", "fastembed"] = "ollama"
+    fastembed_model: str = "nomic-ai/nomic-embed-text-v1.5"
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "llama3.1:8b"
     groq_model: str = "llama-3.1-8b-instant"
     embedding_model: str = "nomic-embed-text"
-    st_embedding_model: str = Field(
-        "nomic-ai/nomic-embed-text-v1.5",
-        description="sentence-transformers twin of nomic-embed-text, used by the hosted demo",
-    )
     num_ctx: int = Field(8192, description="Ollama context window for generation")
     temperature: float = 0.1
     keep_alive: str = Field("30m", description="How long Ollama keeps the model loaded")

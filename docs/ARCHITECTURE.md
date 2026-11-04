@@ -18,7 +18,7 @@ flowchart LR
     subgraph Query["Query"]
         Q[Question] --> R[retrieve.py]
         DB --> R
-        R -->|dense + BM25 → RRF<br/>→ bge reranker| G[generate.py<br/>llama3.1:8b]
+        R -->|dense + BM25 → RRF<br/>→ MiniLM reranker| G[generate.py<br/>llama3.1:8b]
         G --> A[Answer + sources]
     end
     subgraph Analyze["Analyze"]
@@ -43,6 +43,8 @@ flowchart LR
 | `retrieve.py` | Hybrid search, RRF fusion, optional multi-query, cross-encoder reranking, routing |
 | `generate.py` | LLM client, summary prompts, answer prompt, citation tags and normalisation, `ThesisQA` |
 | `analyze.py` | Knowledge card extraction; CSV statistics and their grounded explanation |
+| `store.py` | Saved chats in SQLite, scoped per browser |
+| `fetch_index.py` | Downloads the prebuilt index for the hosted demo |
 | `api.py` | FastAPI endpoints and static hosting of `web/` |
 
 ## 1. Parsing (`ingest.py`)
@@ -135,8 +137,8 @@ re-runs the LLM.
 question ─► [+ 3 LLM rephrasings]            (optional, off by default)
          ─► per query: dense top-20 + BM25 top-20
          ─► Reciprocal Rank Fusion ─► 20 candidates
-         ─► bge-reranker-base cross-encoder against the original question
-         ─► best child per parent ─► top 5 passages
+         ─► MiniLM cross-encoder (ONNX) against the original question
+         ─► best child per parent ─► top 3 passages
 ```
 
 - **Hybrid.** Dense search matches meaning; BM25 matches exact tokens (tool
@@ -147,32 +149,59 @@ question ─► [+ 3 LLM rephrasings]            (optional, off by default)
 - **Cross-encoder reranking.** A bi-encoder embeds the question and passage
   separately; a cross-encoder reads them together and is far more accurate, but
   too slow for the whole corpus. Reranking 20 candidates is the usual compromise.
-  In the evaluation it is the single biggest improvement (MRR 0.72 → 0.93).
+  In the evaluation it is the single biggest improvement (MRR 0.72 → 0.93 with
+  bge-reranker-base). The default is now `ms-marco-MiniLM-L-6-v2` run as ONNX by
+  fastembed: on the same questions it finds every expected page within the top
+  3 (MRR 0.88) while reranking takes ~0.1–1 s instead of ~14 s, and it needs no
+  PyTorch.
 - **Routing.** A regex recognises broad questions ("main idea", "summarize",
   "overall contribution", "key findings", ...). Those also search summary chunks,
   and the whole-thesis summary is always passage 1. Specific questions search
   only original text and tables, so answers cite the thesis, not a summary of it.
-- **Context budget.** Parents longer than 1,200 tokens are replaced by the
-  matching child, so five passages always fit in `num_ctx=8192` with room for
-  the prompt and the answer.
+- **Context budget.** Three passages, and parents longer than 700 tokens are
+  replaced by the matching child. Locally, processing the prompt dominates the
+  time to the first word, so a ~2k-token prompt instead of ~6k is the largest
+  latency win after the reranker.
 
 ## 5. Generation (`generate.py`)
 
-`ChatOllama(llama3.1:8b, temperature=0.1, num_ctx=8192)`. The system prompt
-requires: answer only from the passages; end every factual sentence with a
-citation; reply exactly "Not found in the thesis." when unsupported; never
-invent or estimate numbers.
+`ChatOllama(llama3.1:8b, temperature=0.1, num_ctx=8192, keep_alive=30m)`
+locally, or the same model through Groq on the hosted demo. Every reply has
+three parts:
+
+1. **Mode.** If the passages answer the question, the model answers from them
+   ("thesis"). If not, it writes `GENERAL:` first and answers from general
+   knowledge without citations ("general"); the UI shows that as a *Not from the
+   thesis* badge. A refusal ("Not found in the thesis.") was accurate but
+   unhelpful for questions like "why do silkworms eat mulberry?"; labelling keeps
+   both honesty and usefulness. Background added inside a thesis answer is
+   tagged `(general knowledge)`. `allow_general_knowledge=false` restores the
+   strict behaviour.
+2. **Answer.** A direct first sentence, plain language, technical terms
+   explained, and a citation tag at the end of every sentence taken from the
+   thesis. Numbers must be quoted, never estimated.
+3. **Reasoning.** 1–3 bullets saying which passages were used and what they
+   say, or why the thesis does not cover the question, so a reader can check the
+   answer rather than trust it.
 
 Each passage is labelled `Passage 2 (cite as [Ch.3 §3.8, pp.59–60])`. Asking an
 8B model to compose chapter, section and page itself fails often; copying a tag
-is easy. Even so it makes predictable slips (`[Passage 2, Ch.3 …]`, a copied
-placeholder), which `normalize_citations` repairs before citations are counted
-and before the UI turns them into chips. Answers it does not cite are flagged
-"no citation" in the UI rather than given citations after the fact.
+is easy. Even so it makes predictable slips (`[Passage 2, Ch.3 …]`,
+`(Passage 2)`, a copied placeholder), which `normalize_citations` repairs
+before citations are counted and before the UI turns them into chips. Answers
+it does not cite are flagged "No citation given" rather than given citations
+after the fact.
 
-`ThesisQA.ask_stream` yields tokens for the SSE endpoint and finishes with an
-`Answer`: text, sources (snippet, chapter, section, pages, score, type), the
-passages actually cited, whether it was a broad question and timings.
+**Conversation.** Greetings and thanks skip retrieval. A short follow-up with a
+pronoun ("why is that?") is searched together with the previous question, and
+the last two exchanges are sent with the prompt.
+
+**Streaming.** `ThesisQA.ask_stream` runs the raw tokens through a
+`StreamSplitter`, which holds back just enough text to recognise `GENERAL:` and
+`Reasoning:` and emits `mode`, `token` and `reasoning` events, so the markers
+never flash on screen. It finishes with an `Answer`: text, reasoning, mode,
+sources, the passages actually cited and timings (including time to first
+token).
 
 ## 6. Analysis (`analyze.py`)
 
@@ -198,16 +227,45 @@ decision support.
 FastAPI with lazily created heavy objects (index, reranker, LLM client), all
 injectable through `create_app(...)` so tests run with fakes.
 
-- `POST /ask` streams Server-Sent Events: `token` events, then one `answer`
-  event with the normalised text and sources, then `done`; failures after the
-  stream started arrive as an `error` event. `EventSource` only supports GET,
-  so the browser reads the stream with `fetch`.
+- `POST /ask` streams Server-Sent Events: `chat` (when a new chat was created),
+  `mode`, `token` and `reasoning` events, then one `answer` event with the
+  normalised text and sources, then `done`; failures after the stream started
+  arrive as an `error` event. `EventSource` only supports GET, so the browser
+  reads the stream with `fetch` (which also gives the UI a stop button through
+  `AbortController`).
+- **Saved chats.** `store.py` keeps chats and full answers in SQLite
+  (`data/chats.db`). Each browser generates a random id once and sends it as
+  `X-Client-Id`; every chat query is filtered by it, so visitors of a shared
+  deployment never see each other's chats, without accounts. It is not
+  authentication: anyone with the id could read those chats.
+- **Warm-up.** At startup a background thread loads the index, the reranker and
+  the model, so the first question does not pay for loading them.
 - `POST /ingest` saves the upload and builds the index in a background thread;
   `GET /status` reports progress, the document, Ollama reachability and the
   active retrieval settings.
-- `web/` is plain HTML, CSS and JavaScript with no build step. All server text
+- `web/` is plain HTML, CSS and JavaScript with no build step: a sidebar of
+  saved chats (search, rename, delete with an in-page confirmation), an empty
+  state with suggestions, a composer with a stop button, answers with badges,
+  chips and a collapsible reasoning panel, and a Sources drawer. All server text
   is inserted with `textContent`, never `innerHTML`, so text from the PDF or the
   model cannot inject markup.
+
+## 8. Hosted demo (`deploy/huggingface/`)
+
+A free Hugging Face Docker Space has two CPUs and no GPU, which cannot run an
+8B model at a usable speed. So the demo keeps the pipeline and swaps two
+providers:
+
+- **Generation** through Groq (`llm_provider=groq`, `llama-3.1-8b-instant`, the
+  same model family as local), which answers in about a second.
+- **Query embeddings** through fastembed (`embedding_provider=fastembed`), an
+  ONNX build of nomic-embed-text v1.5. Its vectors match Ollama's (cosine 1.0,
+  identical top hits), so it can search the index built locally with Ollama.
+
+The index contains the thesis text, so `publish.py` uploads it to a **private**
+dataset and the Space downloads it at startup with a read token
+(`thesis_rag.fetch_index`). Uploads are disabled (`allow_ingest=false`), so
+visitors cannot replace the document.
 
 ## Failure handling
 
@@ -216,5 +274,7 @@ injectable through `create_app(...)` so tests run with fakes.
   llama-server to start").
 - Multi-query expansion is an optimisation; if it fails the question is answered
   with the original query alone.
-- A question with no retrieved passages returns "Not found in the thesis."
-  without calling the LLM.
+- A question with no retrieved passages is answered from general knowledge and
+  labelled as such.
+- On the hosted demo, a Groq rate limit is reported as "rate-limited, try again
+  in a minute" rather than a stack trace.

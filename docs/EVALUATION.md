@@ -81,6 +81,23 @@ Two choices worth knowing:
 - **Latency was measured on a heavily loaded laptop** with the reranker on CPU;
   only the relative cost of reranking (~10–15 s here) is informative.
 
+## Choosing a faster reranker
+
+After the comparison above, latency became the priority: on the development
+laptop, reranking with bge-reranker-base took ~14 s per question. The same
+retrieval eval with `ms-marco-MiniLM-L-6-v2` (run as ONNX through fastembed):
+
+| Reranker | hit@5 | hit@3 | MRR | Rerank time |
+|---|---|---|---|---|
+| bge-reranker-base (PyTorch) | 100% | 90% | 0.925 | ~14 s |
+| MiniLM-L-6 (ONNX) | 100% | 100% | 0.883 | ~0.1–1 s |
+
+Every expected page is still found, and within the top 3, so the default now
+uses MiniLM and sends 3 passages instead of 5. The answer-quality columns above
+were measured with the previous answer prompt and are not re-run for the new
+one (which adds reasoning and labelled general-knowledge answers); re-running
+`python eval/run_eval.py` would refresh them.
+
 ## Lessons from building the eval
 
 - Reading the answers, not just the scores, found a real bug: the first answer

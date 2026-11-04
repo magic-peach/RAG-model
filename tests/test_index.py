@@ -73,3 +73,27 @@ def test_with_retry_recovers_then_gives_up(monkeypatch):
 
     with pytest.raises(ConnectionError):
         index_mod.with_retry(broken, attempts=2)
+
+
+def test_collection_is_opened_once_under_concurrency(built, monkeypatch):
+    import threading
+    import time
+
+    pdf, settings = built
+    build_index(pdf, settings)
+    idx = Index(settings, embedder=FakeEmbedder())
+    opened = []
+
+    class SlowClient:
+        def get_collection(self, name):
+            opened.append(name)
+            time.sleep(0.05)  # widen the race window
+            return object()
+
+    monkeypatch.setattr(index_mod, "_chroma_client", lambda path: SlowClient())
+    threads = [threading.Thread(target=lambda: idx.collection) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(opened) == 1

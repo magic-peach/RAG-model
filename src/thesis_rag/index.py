@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -75,29 +76,41 @@ def with_retry(fn: Callable, attempts: int = 4, wait: float = 15.0):
 
 
 class Embedder:
-    """Ollama embeddings with the task prefixes nomic-embed-text was trained with.
+    """nomic-embed-text with the task prefixes it was trained with.
 
     nomic-embed-text expects "search_document: " on indexed text and
     "search_query: " on queries; without them retrieval quality drops
-    noticeably. Other models get the raw text.
+    noticeably. Locally the model is served by Ollama; the hosted demo runs
+    the same weights through fastembed (ONNX), which needs no model server.
     """
 
     def __init__(self, settings: Settings):
-        from langchain_ollama import OllamaEmbeddings
+        self._fastembed = None
+        if settings.embedding_provider == "fastembed":
+            from fastembed import TextEmbedding  # optional dependency: pip install ".[deploy]"
 
-        self._model = OllamaEmbeddings(
-            model=settings.embedding_model, base_url=settings.ollama_base_url
-        )
-        self._prefixed = "nomic" in settings.embedding_model
+            self._fastembed = TextEmbedding(settings.fastembed_model)
+            self._prefixed = True
+        else:
+            from langchain_ollama import OllamaEmbeddings
+
+            self._model = OllamaEmbeddings(
+                model=settings.embedding_model, base_url=settings.ollama_base_url
+            )
+            self._prefixed = "nomic" in settings.embedding_model
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        if self._fastembed is not None:
+            return [v.tolist() for v in self._fastembed.embed(texts)]
+        return with_retry(lambda: self._model.embed_documents(texts))
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if self._prefixed:
             texts = [f"search_document: {t}" for t in texts]
-        return with_retry(lambda: self._model.embed_documents(texts))
+        return self._embed(texts)
 
     def embed_query(self, text: str) -> list[float]:
-        query = f"search_query: {text}" if self._prefixed else text
-        return with_retry(lambda: self._model.embed_query(query))
+        return self._embed([f"search_query: {text}" if self._prefixed else text])[0]
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +467,9 @@ class Index:
         self._bm25 = BM25Okapi([bm25_tokenize(self.chunks[i].embed_text) for i in self._ids])
         self._embedder = embedder
         self._collection = None
+        # The API's warm-up thread and the first request can arrive together;
+        # loading the model or opening Chroma twice at once fails, so serialise it.
+        self._load_lock = threading.RLock()
 
     @classmethod
     def exists(cls, settings: Settings) -> bool:
@@ -461,15 +477,17 @@ class Index:
 
     @property
     def embedder(self) -> Embedder:
-        if self._embedder is None:
-            self._embedder = Embedder(self.settings)
-        return self._embedder
+        with self._load_lock:
+            if self._embedder is None:
+                self._embedder = Embedder(self.settings)
+            return self._embedder
 
     @property
     def collection(self):
-        if self._collection is None:
-            self._collection = _chroma_client(self.dir).get_collection(COLLECTION)
-        return self._collection
+        with self._load_lock:
+            if self._collection is None:
+                self._collection = _chroma_client(self.dir).get_collection(COLLECTION)
+            return self._collection
 
     def dense_search(self, query: str, k: int, types: list[str] | None = None) -> list[Hit]:
         where = {"chunk_type": {"$in": types}} if types else None

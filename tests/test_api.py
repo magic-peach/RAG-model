@@ -78,7 +78,7 @@ def test_ask_streams_tokens_then_answer(settings):
     assert res.status_code == 200 and res.headers["content-type"].startswith("text/event-stream")
     events = parse_sse(res.text)
     kinds = [k for k, _ in events]
-    assert kinds[0] == "token" and kinds[-2:] == ["answer", "done"]
+    assert kinds[0] == "mode" and kinds[-2:] == ["answer", "done"]
     streamed = "".join(d["text"] for k, d in events if k == "token")
     assert streamed == "Yield fell [Passage 1]."
     answer = events[-2][1]
@@ -182,3 +182,85 @@ def test_ollama_status_offline_for_closed_port():
     from thesis_rag.api import _ollama_status
 
     assert _ollama_status("http://127.0.0.1:9", timeout=1) == "offline"
+
+
+CLIENT = {"X-Client-Id": "browser-1234abcd"}
+OTHER = {"X-Client-Id": "browser-9999zzzz"}
+
+
+def test_ask_saves_a_chat_and_uses_its_history(settings):
+    _write_manifest(settings)
+    client = make_client(settings, answers=["GATK [Passage 1].\nReasoning:\n- Passage 1."])
+    events = parse_sse(client.post("/ask", json={"question": "Which tool?"}, headers=CLIENT).text)
+    assert events[0][0] == "chat"
+    chat_id = events[0][1]["id"]
+    assert events[0][1]["title"] == "Which tool?"
+    answer = dict(events)["answer"]
+    assert answer["chat_id"] == chat_id and answer["reasoning"] == "- Passage 1."
+
+    # A follow-up in the same chat is appended, not a new chat.
+    events = parse_sse(
+        client.post("/ask", json={"question": "why?", "chat_id": chat_id}, headers=CLIENT).text
+    )
+    assert events[0][0] == "mode"
+    chat = client.get(f"/chats/{chat_id}", headers=CLIENT).json()
+    assert [m["role"] for m in chat["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert chat["messages"][1]["answer"]["sources"][0]["citation"] == "[Ch.4 §4.3, p.62]"
+
+
+def test_chats_list_rename_delete_and_owner_scoping(settings):
+    _write_manifest(settings)
+    client = make_client(settings)
+    chat = client.post("/chats", headers=CLIENT).json()
+    assert client.get("/chats", headers=CLIENT).json()[0]["id"] == chat["id"]
+    assert client.get("/chats", headers=OTHER).json() == []  # another browser sees nothing
+    assert client.get(f"/chats/{chat['id']}", headers=OTHER).status_code == 404
+
+    res = client.patch(
+        f"/chats/{chat['id']}", json={"title": "  Variant  calling "}, headers=CLIENT
+    )
+    assert res.json()["title"] == "Variant calling"
+    assert client.get("/chats", headers=CLIENT, params={"q": "variant"}).json()[0]["title"] == (
+        "Variant calling"
+    )
+    assert (
+        client.patch(f"/chats/{chat['id']}", json={"title": "x"}, headers=OTHER).status_code == 404
+    )
+
+    assert client.delete(f"/chats/{chat['id']}", headers=OTHER).status_code == 404
+    assert client.delete(f"/chats/{chat['id']}", headers=CLIENT).status_code == 204
+    assert client.get("/chats", headers=CLIENT).json() == []
+
+
+def test_chats_require_a_client_id(settings):
+    client = make_client(settings)
+    assert client.get("/chats").status_code == 400
+    assert client.get("/chats", headers={"X-Client-Id": "bad id!"}).status_code == 400
+
+
+def test_ask_unknown_chat_is_404(settings):
+    _write_manifest(settings)
+    res = make_client(settings).post(
+        "/ask", json={"question": "x", "chat_id": "nope"}, headers=CLIENT
+    )
+    assert res.status_code == 404
+
+
+def test_ingest_can_be_disabled(settings):
+    client = make_client(settings.model_copy(update={"allow_ingest": False}))
+    res = client.post("/ingest", files={"file": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+    assert res.status_code == 403
+    assert client.get("/status").json()["ingest_enabled"] is False
+
+
+def test_ask_reports_missing_model_configuration(settings):
+    _write_manifest(settings)
+
+    def broken_factory(s):
+        raise RuntimeError("The api_key client option must be set")
+
+    client = TestClient(
+        create_app(settings, qa_factory=broken_factory, check_ollama=lambda u: "ok")
+    )
+    res = client.post("/ask", json={"question": "x"})
+    assert res.status_code == 503 and "missing API key" in res.json()["detail"]

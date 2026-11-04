@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import (
@@ -33,11 +34,24 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RAG_", extra="ignore")
 
     # --- Models ---
+    # Locally everything runs on Ollama. The hosted demo uses Groq for generation
+    # (the same Llama 3.1 8B, much faster) because a free CPU host cannot run an
+    # 8B model, and fastembed for query embeddings: its ONNX export of
+    # nomic-embed-text v1.5 gives the same vectors as Ollama's (cosine 1.0), so
+    # it can search an index that was built with Ollama.
+    llm_provider: Literal["ollama", "groq"] = "ollama"
+    embedding_provider: Literal["ollama", "fastembed"] = "ollama"
+    fastembed_model: str = "nomic-ai/nomic-embed-text-v1.5"
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "llama3.1:8b"
+    # Groq no longer serves Llama 3.1; gpt-oss-20b is an open-weight model of a
+    # similar size that it does serve, with fast first tokens (~1 s).
+    groq_model: str = "openai/gpt-oss-20b"
     embedding_model: str = "nomic-embed-text"
     num_ctx: int = Field(8192, description="Ollama context window for generation")
     temperature: float = 0.1
+    keep_alive: str = Field("30m", description="How long Ollama keeps the model loaded")
+    max_answer_tokens: int = 600
 
     # --- Chunking ---
     chunk_size: int = Field(600, description="Target tokens per child chunk")
@@ -52,24 +66,36 @@ class Settings(BaseSettings):
 
     # --- Retrieval ---
     retrieve_k: int = 20
-    top_k: int = 5
+    rerank_k: int = Field(12, description="Fused candidates re-scored by the cross-encoder")
+    top_k: int = Field(3, description="Passages sent to the LLM (fewer = faster prompts)")
     rrf_k: int = 60
     use_bm25: bool = True
     use_reranker: bool = True
-    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     use_multi_query: bool = False
     num_query_variants: int = 3
     use_parent_context: bool = True
     max_passage_tokens: int = Field(
-        1200,
+        700,
         description="A parent longer than this is not sent to the LLM; the matched chunk is",
     )
 
     # --- Ingestion ---
     summarize_sections: bool = True
 
+    # --- Answers ---
+    allow_general_knowledge: bool = Field(
+        True,
+        description="Answer off-thesis questions from general knowledge, labelled as such",
+    )
+    history_turns: int = Field(2, description="Previous Q&A pairs sent with a follow-up")
+
     # --- Storage ---
     data_dir: Path = Path("data")
+    chats_db: Path | None = Field(
+        None, description="SQLite file for saved chats (default: data_dir/chats.db)"
+    )
+    allow_ingest: bool = Field(True, description="False disables POST /ingest (public demo)")
 
     @model_validator(mode="after")
     def _check(self) -> Settings:

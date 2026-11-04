@@ -251,3 +251,16 @@ def test_ingest_can_be_disabled(settings):
     res = client.post("/ingest", files={"file": ("a.pdf", b"%PDF-1.4", "application/pdf")})
     assert res.status_code == 403
     assert client.get("/status").json()["ingest_enabled"] is False
+
+
+def test_ask_reports_missing_model_configuration(settings):
+    _write_manifest(settings)
+
+    def broken_factory(s):
+        raise RuntimeError("The api_key client option must be set")
+
+    client = TestClient(
+        create_app(settings, qa_factory=broken_factory, check_ollama=lambda u: "ok")
+    )
+    res = client.post("/ask", json={"question": "x"})
+    assert res.status_code == 503 and "missing API key" in res.json()["detail"]

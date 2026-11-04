@@ -64,6 +64,7 @@ class Settings(BaseSettings):
 
     # --- Retrieval ---
     retrieve_k: int = 20
+    rerank_k: int = Field(12, description="Fused candidates re-scored by the cross-encoder")
     top_k: int = Field(3, description="Passages sent to the LLM (fewer = faster prompts)")
     rrf_k: int = 60
     use_bm25: bool = True
@@ -89,6 +90,9 @@ class Settings(BaseSettings):
 
     # --- Storage ---
     data_dir: Path = Path("data")
+    chats_db: Path | None = Field(
+        None, description="SQLite file for saved chats (default: data_dir/chats.db)"
+    )
     allow_ingest: bool = Field(True, description="False disables POST /ingest (public demo)")
 
     @model_validator(mode="after")

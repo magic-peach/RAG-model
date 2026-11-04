@@ -117,7 +117,8 @@ class CrossEncoderReranker:
     def score(self, query: str, texts: list[str]) -> list[float]:
         if not texts:
             return []
-        logits = self._load().rerank(query, texts)
+        # Small batches keep peak memory around 0.5 GB instead of >1 GB.
+        logits = self._load().rerank(query, texts, batch_size=8)
         # A sigmoid turns the raw logits into 0-1 relevance scores for display.
         return [1.0 / (1.0 + math.exp(-float(x))) for x in logits]
 
@@ -225,6 +226,9 @@ class Retriever:
 
         if s.use_reranker and candidates:
             t2 = time.perf_counter()
+            # Only the best-fused candidates are re-scored: the cross-encoder is
+            # the slowest step, and fusion already puts the answers near the top.
+            candidates = candidates[: max(s.rerank_k, s.top_k) + len(pinned)]
             texts = [idx.chunks[cid].embed_text for cid in candidates]
             scores = dict(zip(candidates, self.reranker.score(question, texts), strict=True))
             rest = sorted(candidates[len(pinned) :], key=lambda cid: -scores[cid])

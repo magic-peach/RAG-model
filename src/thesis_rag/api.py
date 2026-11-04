@@ -112,7 +112,8 @@ class AppState:
         if self._store is None:
             from .store import ChatStore
 
-            self._store = ChatStore(self.settings.data_dir / "chats.db")
+            path = self.settings.chats_db or self.settings.data_dir / "chats.db"
+            self._store = ChatStore(path)
         return self._store
 
     def warm_up(self) -> None:
@@ -305,7 +306,11 @@ def create_app(
                 new_chat = store.create_chat(owner, title_from(question))
                 chat_id = new_chat["id"]
         history = store.history(owner, chat_id, state.settings.history_turns) if store else []
-        qa = state.qa()
+        try:
+            qa = state.qa()
+        except Exception as exc:  # e.g. the hosted model's API key is not configured
+            log.exception("Could not start the QA pipeline")
+            raise HTTPException(503, _friendly_error(exc)) from exc
 
         def events() -> Iterator[str]:
             try:
@@ -399,6 +404,8 @@ def _friendly_error(exc: Exception) -> str:
     text = str(exc)
     if "Connection refused" in text or "ConnectError" in type(exc).__name__:
         return "Cannot reach the language model. Is Ollama running (ollama serve)?"
+    if "api_key" in text.lower() or "api key" in text.lower():
+        return "The language model is not configured on this server (missing API key)."
     if "rate limit" in text.lower() or "429" in text:
         return "The model is rate-limited right now; please try again in a minute."
     return text or type(exc).__name__

@@ -4,7 +4,13 @@
 .ruff_cache
 .pytest_cache
 **/__pycache__
-data
+# Only the prebuilt index and knowledge card may enter a build (deploy/fly);
+# the PDF, caches and saved chats never do.
+data/*
+!data/index
+data/index/*
+!data/index/structured-600-72
+!data/knowledge_card.json
 notebooks
 eval
 tests

@@ -4,7 +4,7 @@
 .ruff_cache
 .pytest_cache
 **/__pycache__
-# Only the prebuilt index and knowledge card may enter a build (deploy/fly);
+# Only the prebuilt index and knowledge card may enter a build (deploy/cloudrun);
 # the PDF, caches and saved chats never do.
 data/*
 !data/index

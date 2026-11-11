@@ -112,8 +112,8 @@ class AppState:
         if self._store is None:
             from .store import ChatStore
 
-            path = self.settings.chats_db or self.settings.data_dir / "chats.db"
-            self._store = ChatStore(path)
+            location = self.settings.chats_db or self.settings.data_dir / "chats.db"
+            self._store = ChatStore(location, self.settings.chats_db_token)
         return self._store
 
     def warm_up(self) -> None:

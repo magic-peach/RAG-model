@@ -1,7 +1,8 @@
-# Fly.io image for the public demo. Generation runs on Groq (same Llama 3.1
-# 8B as locally), query embeddings on fastembed. Fly's registry is private to
-# the account, so the prebuilt index is baked into the image; it is never
-# pushed anywhere public.
+# Cloud Run image for the public demo. Generation runs on Groq, query
+# embeddings on fastembed. The image goes to a private Artifact Registry
+# repository, so the prebuilt index is baked into it; it is never pushed
+# anywhere public. Saved chats go to Turso (RAG_CHATS_DB) because a Cloud Run
+# instance's disk is wiped when it shuts down.
 FROM python:3.11-slim
 
 RUN useradd --create-home --uid 1000 user

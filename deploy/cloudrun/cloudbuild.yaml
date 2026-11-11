@@ -1,0 +1,13 @@
+# Builds the hosted-demo image on Cloud Build and pushes it to the private
+# Artifact Registry repository. Run from the repository root:
+#   gcloud builds submit --config deploy/cloudrun/cloudbuild.yaml --region asia-south1
+substitutions:
+  _IMAGE: asia-south1-docker.pkg.dev/${PROJECT_ID}/thesis-rag/app:latest
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "deploy/cloudrun/Dockerfile", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+options:
+  # The build downloads and bakes ~600 MB of ONNX models; the default
+  # machine works but is slow.
+  machineType: E2_HIGHCPU_8

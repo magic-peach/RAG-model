@@ -7,7 +7,7 @@ knowledge, and clearly labelled as such. Chats are saved, and you can upload
 new data to see it explained against the thesis. Runs entirely on your
 machine with Ollama (Llama 3.1 8B and nomic-embed-text).
 
-**Live demo:** https://thesis-rag-magicpeach.fly.dev (hosted on Fly.io; the first visit after a quiet spell takes ~30-60 s to wake up)
+**Live demo:** https://thesis-rag-577263136239.asia-south1.run.app (Google Cloud Run, Mumbai; it sleeps when idle, so the first visit after a quiet spell takes a while to wake up and load the models)
 
 ![Thesis RAG: a cited answer with its reasoning and the Sources drawer](docs/screenshot.png)
 
@@ -116,20 +116,37 @@ in Docker:
 RAG_OLLAMA_BASE_URL=http://host.docker.internal:11434 docker compose up --build --no-deps app
 ```
 
-### Deployment (Hugging Face Spaces)
+### Deployment (Google Cloud Run)
 
-The live demo is a free Docker Space. A free CPU host cannot run an 8B model,
-so the demo uses the open-weight gpt-oss-20b through [Groq](https://groq.com) (Groq no longer serves Llama 3.1)
-(`RAG_LLM_PROVIDER=groq`) and computes query embeddings with fastembed, whose
-ONNX nomic-embed-text gives the same vectors as Ollama's. The prebuilt index
-contains the thesis text, so it lives in a private dataset that the Space
-downloads at startup; uploads are disabled on the demo.
+The live demo runs `deploy/cloudrun/Dockerfile` on Cloud Run. A free CPU host
+cannot run an 8B model, so the demo generates with the open-weight gpt-oss-20b
+through [Groq](https://groq.com) (`RAG_LLM_PROVIDER=groq`) and computes query
+embeddings with fastembed, whose ONNX nomic-embed-text gives the same vectors
+as Ollama's. Uploads are disabled on the demo.
+
+- **The index is baked into the image.** It contains the thesis text, so the
+  image goes only to a private Artifact Registry repository. `.gcloudignore`
+  is an allowlist: the upload to Cloud Build carries the code, the index and
+  the knowledge card, never the PDF, caches or saved chats.
+- **Saved chats live in Turso.** A Cloud Run instance's disk is wiped when it
+  shuts down, so `RAG_CHATS_DB` points at a `libsql://` database (hosted
+  SQLite, same SQL). Locally it stays a file in `data/`.
+- **Scales to zero.** At most 2 instances of 1 vCPU / 2 GiB (the ONNX models
+  peak at ~1.3 GB). An idle demo costs nothing, at the price of a cold start.
+- **Secrets** (`GROQ_API_KEY`, `RAG_CHATS_DB`, `RAG_CHATS_DB_TOKEN`) live in
+  Secret Manager and reach the container as environment variables.
 
 ```bash
-hf auth login                       # write token
-python deploy/huggingface/publish.py
-# then add GROQ_API_KEY and HF_TOKEN (read) as Space secrets
+gcloud builds submit --config deploy/cloudrun/cloudbuild.yaml --region asia-south1
+gcloud run deploy thesis-rag \
+  --image asia-south1-docker.pkg.dev/$PROJECT/thesis-rag/app:latest \
+  --region asia-south1 --memory 2Gi --cpu 1 --min-instances 0 --max-instances 2 \
+  --cpu-boost --timeout 300 --allow-unauthenticated \
+  --set-secrets GROQ_API_KEY=groq-api-key:latest,RAG_CHATS_DB=rag-chats-db:latest,RAG_CHATS_DB_TOKEN=rag-chats-db-token:latest
 ```
+
+Cloud Run reserves some paths ending in `z`, so `/healthz` answers 404 from
+Google's front end on the demo; `/status` works as a health check there.
 
 ## Speed
 
@@ -144,7 +161,7 @@ Ollama:
 
 The answer streams, so reading starts at the first words. Ollama keeps the
 model loaded between questions (`keep_alive`), and the server warms the index,
-reranker and model up at startup. On the hosted demo (Fly.io + Groq), measured
+reranker and model up at startup. On the earlier hosted demo (Fly.io + Groq), measured
 end to end: thesis questions finish in about 4–7 s (retrieval on a shared CPU
 is most of it; generation takes under a second), greetings in about 1 s.
 
@@ -194,6 +211,7 @@ different YAML file.
 | `summarize_sections` | `true` | Build hierarchical summaries at ingest |
 | `allow_ingest` | `true` | `false` disables uploads (public demo) |
 | `data_dir` | `data` | PDFs, index, caches, knowledge card, chats |
+| `chats_db` / `chats_db_token` | `data_dir/chats.db` / – | Saved chats: a SQLite file, or a `libsql://` Turso URL plus its token (hosted demo) |
 
 ## Evaluation
 

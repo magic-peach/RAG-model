@@ -1,0 +1,18 @@
+# What `gcloud builds submit` uploads to Cloud Build. Allowlist: everything is
+# excluded, then only what deploy/cloudrun/Dockerfile copies is let back in.
+# The thesis PDF (data/raw), caches and saved chats never leave this machine.
+/*
+!/pyproject.toml
+!/README.md
+!/config.yaml
+!/src/
+!/web/
+!/deploy/
+!/.dockerignore
+!/data/
+/data/*
+!/data/knowledge_card.json
+!/data/index/
+/data/index/*
+!/data/index/structured-600-72/
+**/__pycache__/

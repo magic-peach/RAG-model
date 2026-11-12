@@ -92,8 +92,13 @@ class Settings(BaseSettings):
 
     # --- Storage ---
     data_dir: Path = Path("data")
-    chats_db: Path | None = Field(
-        None, description="SQLite file for saved chats (default: data_dir/chats.db)"
+    chats_db: str | None = Field(
+        None,
+        description="Saved chats: a SQLite file, or a libsql:// Turso URL for hosts without "
+        "a persistent disk (default: data_dir/chats.db)",
+    )
+    chats_db_token: str | None = Field(
+        None, description="Auth token for a libsql:// chats_db (keep it in the environment)"
     )
     allow_ingest: bool = Field(True, description="False disables POST /ingest (public demo)")
 

@@ -1,4 +1,6 @@
-from thesis_rag.store import ChatStore, title_from
+from pathlib import Path
+
+from thesis_rag.store import ChatStore, is_remote, title_from
 
 
 def test_title_from_trims_long_questions():
@@ -34,3 +36,26 @@ def test_rename_rejects_blank_titles(tmp_path):
     chat = store.create_chat("o")
     assert not store.rename_chat("o", chat["id"], "   ")
     assert store.rename_chat("o", chat["id"], "Ok")
+
+
+def test_delete_removes_messages_too(tmp_path):
+    store = ChatStore(tmp_path / "c.db")
+    chat = store.create_chat("o", "Gone")
+    store.add_exchange("o", chat["id"], "q?", {"answer": "a"})
+    assert store.delete_chat("o", chat["id"])
+    assert store._query("SELECT COUNT(*) AS n FROM messages")[0]["n"] == 0
+
+
+def test_delete_is_owner_scoped(tmp_path):
+    store = ChatStore(tmp_path / "c.db")
+    chat = store.create_chat("o", "Mine")
+    store.add_exchange("o", chat["id"], "q?", {"answer": "a"})
+    assert not store.delete_chat("intruder", chat["id"])
+    assert store.get_chat("o", chat["id"])["messages"]
+
+
+def test_is_remote():
+    assert is_remote("libsql://chats.turso.io")
+    assert is_remote("https://chats.turso.io")
+    assert not is_remote("data/chats.db")
+    assert not is_remote(Path("data/chats.db"))

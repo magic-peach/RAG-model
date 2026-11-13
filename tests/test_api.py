@@ -264,3 +264,23 @@ def test_ask_reports_missing_model_configuration(settings):
     )
     res = client.post("/ask", json={"question": "x"})
     assert res.status_code == 503 and "missing API key" in res.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("value", "mode"),
+    [("0", False), ("1", True), ("", True), ("startup", "startup"), (" Startup ", "startup")],
+)
+def test_warm_up_mode(value, mode):
+    from thesis_rag.api import _warm_up_mode
+
+    assert _warm_up_mode(value) == mode
+
+
+def test_startup_warm_up_runs_before_serving(tmp_path, monkeypatch):
+    from thesis_rag.api import AppState
+
+    calls = []
+    monkeypatch.setattr(AppState, "warm_up", lambda self: calls.append("warm"))
+    app = create_app(Settings(data_dir=tmp_path), warm_up="startup")
+    with TestClient(app):
+        assert calls == ["warm"]  # finished before the first request could arrive

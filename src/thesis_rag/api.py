@@ -22,6 +22,7 @@ them for fakes via :func:`create_app`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -208,13 +209,20 @@ def create_app(
     qa_factory: Callable[[Settings], object] | None = None,
     build_fn: Callable | None = None,
     check_ollama: Callable[[str], str] = _ollama_status,
-    warm_up: bool = False,
+    warm_up: bool | str = False,
 ) -> FastAPI:
     state = AppState(settings or get_settings(), qa_factory, build_fn)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        if warm_up:  # in a thread, so the server accepts requests immediately
+        if warm_up == "startup":
+            # Finish loading before accepting traffic. On Cloud Run the CPU is
+            # throttled outside requests, so a background warm-up would barely
+            # run and the first question would pay for it; during startup the
+            # instance gets full (boosted) CPU, and the port only opens once
+            # the models are ready.
+            await asyncio.to_thread(state.warm_up)
+        elif warm_up:  # in a thread, so the server accepts requests immediately
             threading.Thread(target=state.warm_up, name="warm-up", daemon=True).start()
         yield
 
@@ -411,7 +419,15 @@ def _friendly_error(exc: Exception) -> str:
     return text or type(exc).__name__
 
 
-app = create_app(warm_up=os.environ.get("RAG_WARMUP", "1") != "0")
+def _warm_up_mode(value: str) -> bool | str:
+    """RAG_WARMUP: "0" off, "startup" load before serving, anything else in the background."""
+    value = value.strip().lower()
+    if value == "startup":
+        return "startup"
+    return value != "0"
+
+
+app = create_app(warm_up=_warm_up_mode(os.environ.get("RAG_WARMUP", "1")))
 
 
 def main() -> None:

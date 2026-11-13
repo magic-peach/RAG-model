@@ -11,6 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HOME=/home/user \
     HF_HOME=/home/user/.cache/huggingface \
+    FASTEMBED_CACHE_PATH=/home/user/.cache/fastembed \
     RAG_LLM_PROVIDER=groq \
     RAG_EMBEDDING_PROVIDER=fastembed \
     RAG_ALLOW_INGEST=false \
@@ -35,6 +36,10 @@ USER user
 RUN python -c "from fastembed import TextEmbedding; \
 from fastembed.rerank.cross_encoder import TextCrossEncoder; \
 TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2'); TextEmbedding('nomic-ai/nomic-embed-text-v1.5')"
+# The models are in the image now, so skip Hugging Face's online checks at
+# runtime, and load everything before the port opens (see RAG_WARMUP in api.py).
+ENV HF_HUB_OFFLINE=1 \
+    RAG_WARMUP=startup
 
 EXPOSE 8080
 CMD ["uvicorn", "thesis_rag.api:app", "--host", "0.0.0.0", "--port", "8080"]

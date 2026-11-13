@@ -140,10 +140,16 @@ as Ollama's. Uploads are disabled on the demo.
 gcloud builds submit --config deploy/cloudrun/cloudbuild.yaml --region asia-south1
 gcloud run deploy thesis-rag \
   --image asia-south1-docker.pkg.dev/$PROJECT/thesis-rag/app:latest \
-  --region asia-south1 --memory 2Gi --cpu 1 --min-instances 0 --max-instances 2 \
+  --region asia-south1 --memory 4Gi --cpu 2 --min-instances 0 --max-instances 2 \
   --cpu-boost --timeout 300 --allow-unauthenticated \
   --set-secrets GROQ_API_KEY=groq-api-key:latest,RAG_CHATS_DB=rag-chats-db:latest,RAG_CHATS_DB_TOKEN=rag-chats-db-token:latest
 ```
+
+2 GiB is not enough: the two ONNX models grow to about 1.5 GB while
+answering, and Cloud Run kills an instance that passes its limit mid-answer.
+The image sets `RAG_WARMUP=startup`, so a new instance loads the models
+before it accepts traffic, and `HF_HUB_OFFLINE=1`, so it does not check
+Hugging Face for models already baked into the image.
 
 Cloud Run reserves some paths ending in `z`, so `/healthz` answers 404 from
 Google's front end on the demo; `/status` works as a health check there.
